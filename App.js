@@ -4,7 +4,6 @@ import { Buffer } from 'buffer';
 global.Buffer = global.Buffer || Buffer;
 
 import React, { useState, useEffect } from 'react';
-import React, { useState, useEffect } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, Platform, ScrollView } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
