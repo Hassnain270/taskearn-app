@@ -1,0 +1,77 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------
+    // users/{uid}
+    // Client (app) is allowed to read its own document and update
+    // only "safe" profile-type fields. Money fields (balance,
+    // taskCount, todayEarnings, totalEarnings, tronAddress,
+    // walletIndex, vip status) can ONLY be written by the Admin SDK
+    // (Cloud Functions), never directly by the client.
+    // ---------------------------------------------------------------
+    match /users/{userId} {
+
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Registration: user may create their own doc once, but cannot
+      // set balance/taskCount/earnings themselves at signup.
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && !('balance' in request.resource.data)
+                    && !('taskCount' in request.resource.data)
+                    && !('todayEarnings' in request.resource.data)
+                    && !('totalEarnings' in request.resource.data)
+                    && !('tronAddress' in request.resource.data);
+
+      // Profile-only updates: wallet payout address, phone, email,
+      // referral display fields. Every money/limit field below must
+      // stay UNCHANGED compared to the existing document.
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly([
+                           'walletAddress', 'trc20Address',
+                           'phone', 'email', 'displayName'
+                         ]);
+
+      // No client-side delete of user docs.
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------
+    // withdrawals/{id}
+    // Only Cloud Functions (Admin SDK, which bypasses these rules)
+    // may create or modify withdrawal records. The client may only
+    // read its own withdrawal history.
+    // ---------------------------------------------------------------
+    match /withdrawals/{withdrawalId} {
+      allow read: if request.auth != null
+                  && resource.data.userId == request.auth.uid;
+      allow write: if false; // server-only (Admin SDK bypasses rules)
+    }
+
+    // ---------------------------------------------------------------
+    // transactions/{id}  (deposit / earning history shown in HistoryScreen)
+    // Read-only for the owning user; written only by Cloud Functions.
+    // ---------------------------------------------------------------
+    match /transactions/{txId} {
+      allow read: if request.auth != null
+                  && resource.data.userId == request.auth.uid;
+      allow write: if false; // server-only
+    }
+
+    // ---------------------------------------------------------------
+    // metadata/{doc}  (e.g. wallet_counter)  — internal use only.
+    // ---------------------------------------------------------------
+    match /metadata/{docId} {
+      allow read, write: if false; // server-only
+    }
+
+    // Deny everything else by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
