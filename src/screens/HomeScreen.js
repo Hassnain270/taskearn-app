@@ -11,7 +11,8 @@ import {
   Dimensions,
   Easing,
   ActivityIndicator,
-  Platform
+  Platform,
+  Linking
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
@@ -20,6 +21,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { ThemeContext } from '../../ThemeContext';
 
 const { width: screenWidth } = Dimensions.get('window');
+
+const APK_DOWNLOAD_URL = 'https://firebasestorage.googleapis.com/v0/b/taskearn-e5c35.firebasestorage.app/o/TaskEarn.apk?alt=media';
 
 const baseTickerData = [
   { prefix: "kha", suffix: "7", amount: 45.00 },
@@ -261,6 +264,10 @@ export default function HomeScreen({ navigation, route }) {
     return () => clearInterval(timer);
   }, [currentBannerIndex]);
 
+  const handleDownloadApp = () => {
+    Linking.openURL(APK_DOWNLOAD_URL).catch(() => {});
+  };
+
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
   if (loading) {
@@ -376,6 +383,7 @@ export default function HomeScreen({ navigation, route }) {
               else if (item.title === 'About Us') navigation.navigate('AboutUs');
               else if (item.title === 'Invitation') navigation.navigate('Invitation', { userUid });
               else if (item.title === 'Notices') navigation.navigate('Notices');
+              else if (item.title === 'Download App') handleDownloadApp();
             }}>
               <View style={currentStyles.menuIconContainer}>
                 {item.iconSet === 'FontAwesome5' ? (
