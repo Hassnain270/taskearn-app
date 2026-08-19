@@ -112,7 +112,7 @@ const linking = {
   prefixes: [
     prefix,
     'taskearn://',
-    'https://taskearn-app.official-platform.workers.dev'
+    'https://taskearn-app.com'
   ],
   config: {
     screens: {
