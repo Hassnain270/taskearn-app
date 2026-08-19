@@ -1,140 +1,208 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useContext, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
+  FlatList,
   SafeAreaView,
   StatusBar,
-  Image,
-  Platform
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator
 } from 'react-native';
-import { Feather, FontAwesome5 } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ThemeContext } from '../../ThemeContext';
+import { functions } from '../firebaseConfig';
+import { httpsCallable } from 'firebase/functions';
 
 export default function LiveSupportScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
-  const [connectionState, setConnectionState] = useState('idle'); 
-  const [dotCount, setDotCount] = useState('');
-
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
-  useEffect(() => {
-    let interval;
-    if (connectionState === 'connecting') {
-      interval = setInterval(() => {
-        setDotCount((prev) => (prev.length >= 3 ? '' : prev + '.'));
-      }, 400);
-    } else {
-      setDotCount('');
+  const [messages, setMessages] = useState([
+    {
+      id: 'welcome',
+      role: 'model',
+      text: "Hi! I'm the TaskEarn AI Assistant. Ask me anything about deposits, withdrawals, VIP levels, tasks, referrals, or your account — I'm here to help."
     }
-    return () => clearInterval(interval);
-  }, [connectionState]);
+  ]);
+  const [inputText, setInputText] = useState('');
+  const [sending, setSending] = useState(false);
+  const flatListRef = useRef(null);
 
-  const handleSupportConnect = () => {
-    if (connectionState === 'connecting') return;
-    setConnectionState('connecting');
-  };
-
-  const handleBackAction = () => {
+  const handleBack = () => {
     if (navigation && typeof navigation.goBack === 'function') {
       navigation.goBack();
     }
   };
 
+  const handleSend = async () => {
+    const trimmed = inputText.trim();
+    if (!trimmed || sending) return;
+
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: trimmed };
+    const historyForBackend = messages
+      .filter((m) => m.id !== 'welcome')
+      .map((m) => ({ role: m.role, text: m.text }));
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInputText('');
+    setSending(true);
+
+    try {
+      const chatFn = httpsCallable(functions, 'chatWithSupportAI');
+      const result = await chatFn({ message: trimmed, history: historyForBackend });
+      const replyText = result?.data?.reply || "Sorry, I couldn't process that. Please try again.";
+      setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'model', text: replyText }]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: 'model', text: "Sorry, I'm having trouble responding right now. Please try again in a moment." }
+      ]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (flatListRef.current && messages.length > 0) {
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [messages]);
+
+  const renderMessage = ({ item }) => {
+    const isUser = item.role === 'user';
+    return (
+      <View style={[styles.messageRow, isUser ? styles.messageRowUser : styles.messageRowAI]}>
+        {!isUser && (
+          <View style={styles.aiAvatar}>
+            <MaterialCommunityIcons name="robot-happy-outline" size={16} color="#FFFFFF" />
+          </View>
+        )}
+        <View style={[
+          styles.bubble,
+          isUser ? styles.bubbleUser : currentStyles.bubbleAI
+        ]}>
+          <Text style={isUser ? styles.bubbleUserText : currentStyles.bubbleAIText}>
+            {item.text}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={currentStyles.container}>
-      <StatusBar 
-        barStyle={isDarkMode ? "light-content" : "dark-content"} 
-        backgroundColor={isDarkMode ? "#0B0E14" : "#FFFFFF"} 
-      />
+      <StatusBar backgroundColor={isDarkMode ? "#0B0E14" : "#FFFFFF"} barStyle={isDarkMode ? "light-content" : "dark-content"} />
 
       <View style={currentStyles.header}>
-        <TouchableOpacity style={currentStyles.backButton} onPress={handleBackAction}>
-          <Feather name="arrow-left" size={18} color={isDarkMode ? "#FFFFFF" : "#1E293B"} />
+        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+          <Feather name="arrow-left" size={22} color={isDarkMode ? "#E2E8F0" : "#1E293B"} />
         </TouchableOpacity>
-        <Text style={currentStyles.headerTitle}>Live Support</Text>
-        <View style={{ width: 36 }} />
-      </View>
-
-      <View style={styles.contentContainer}>
-        <View style={currentStyles.imageOuterRing}>
-          <View style={currentStyles.imageInnerRing}>
-            <Image
-              source={{ uri: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=400&auto=format&fit=crop' }}
-              style={styles.supportAvatar}
-            />
+        <View style={styles.headerCenter}>
+          <View style={styles.headerIconBox}>
+            <MaterialCommunityIcons name="robot-happy-outline" size={18} color="#FFFFFF" />
           </View>
-          <View style={currentStyles.onlineBadge} />
+          <View>
+            <Text style={currentStyles.headerTitle}>TaskEarn AI Assistant</Text>
+            <View style={styles.statusRow}>
+              <View style={styles.onlineDot} />
+              <Text style={styles.statusText}>Online</Text>
+            </View>
+          </View>
         </View>
-
-        <Text style={currentStyles.mainHeading}>How can we help you today?</Text>
-        <Text style={currentStyles.subHeading}>
-          Our official support agents are online to secure and assist your financial tasks.
-        </Text>
-
-        <TouchableOpacity
-          style={[
-            styles.telegramButton, 
-            connectionState === 'connecting' && (isDarkMode ? styles.buttonDisabledDark : styles.buttonDisabledLight)
-          ]}
-          onPress={handleSupportConnect}
-          activeOpacity={0.8}
-        >
-          {connectionState !== 'connecting' && (
-            <FontAwesome5 name="telegram-plane" size={20} color="#FFFFFF" style={styles.buttonIcon} />
-          )}
-          <Text style={[
-            styles.telegramButtonText,
-            connectionState === 'connecting' && (isDarkMode ? styles.textDisabledDark : styles.textDisabledLight)
-          ]}>
-            {connectionState === 'connecting' ? `Connecting${dotCount}` : 'Connect to Customer Service'}
-          </Text>
-        </TouchableOpacity>
+        <View style={{ width: 30 }} />
       </View>
 
-      <View style={styles.footer}>
-        <Text style={currentStyles.footerText}>Secure Connection • 24/7 Instant Routing</Text>
-      </View>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          contentContainerStyle={styles.messagesList}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        />
+
+        {sending && (
+          <View style={styles.typingRow}>
+            <View style={styles.aiAvatar}>
+              <MaterialCommunityIcons name="robot-happy-outline" size={16} color="#FFFFFF" />
+            </View>
+            <View style={[styles.bubble, currentStyles.bubbleAI, styles.typingBubble]}>
+              <ActivityIndicator size="small" color={isDarkMode ? "#94A3B8" : "#64748B"} />
+            </View>
+          </View>
+        )}
+
+        <View style={currentStyles.inputBar}>
+          <TextInput
+            style={currentStyles.textInput}
+            placeholder="Type your message..."
+            placeholderTextColor={isDarkMode ? "#64748B" : "#94A3B8"}
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+            maxLength={1000}
+            editable={!sending}
+          />
+          <TouchableOpacity
+            style={[styles.sendBtn, (!inputText.trim() || sending) && styles.sendBtnDisabled]}
+            onPress={handleSend}
+            disabled={!inputText.trim() || sending}
+          >
+            <Feather name="send" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const lightStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1E293B', fontStyle: 'italic' },
-  imageOuterRing: { width: 154, height: 154, borderRadius: 77, borderWidth: 2, borderColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', position: 'relative', marginBottom: 32 },
-  imageInnerRing: { width: 142, height: 142, borderRadius: 71, overflow: 'hidden', backgroundColor: '#F1F5F9' },
-  onlineBadge: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#10B981', position: 'absolute', bottom: 8, right: 12, borderWidth: 3, borderColor: '#F8FAFC' },
-  mainHeading: { fontSize: 24, fontWeight: 'bold', color: '#1E293B', textAlign: 'center', marginBottom: 12, letterSpacing: -0.2 },
-  subHeading: { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 20, paddingHorizontal: 12, marginBottom: 40 },
-  footerText: { fontSize: 11, color: '#94A3B8', fontWeight: '500' }
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#1E293B' },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9', gap: 8 },
+  textInput: { flex: 1, backgroundColor: '#F8FAFC', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: '#1E293B', maxHeight: 100, borderWidth: 1, borderColor: '#F1F5F9' },
+  bubbleAI: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F1F5F9' },
+  bubbleAIText: { color: '#334155', fontSize: 14, lineHeight: 20 }
 });
 
 const darkStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E14' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
-  backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#161B22', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF', fontStyle: 'italic' },
-  imageOuterRing: { width: 154, height: 154, borderRadius: 77, borderWidth: 2, borderColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', position: 'relative', marginBottom: 32 },
-  imageInnerRing: { width: 142, height: 142, borderRadius: 71, overflow: 'hidden', backgroundColor: '#161B22' },
-  onlineBadge: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#10B981', position: 'absolute', bottom: 8, right: 12, borderWidth: 3, borderColor: '#0B0E14' },
-  mainHeading: { fontSize: 24, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', marginBottom: 12, letterSpacing: -0.2 },
-  subHeading: { fontSize: 13, color: '#94A3B8', textAlign: 'center', lineHeight: 20, paddingHorizontal: 12, marginBottom: 40 },
-  footerText: { fontSize: 11, color: '#484F58', fontWeight: '500' }
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#21262D' },
+  headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#161B22', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#21262D', gap: 8 },
+  textInput: { flex: 1, backgroundColor: '#0B0E14', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: '#E2E8F0', maxHeight: 100, borderWidth: 1, borderColor: '#21262D' },
+  bubbleAI: { backgroundColor: '#161B22', borderWidth: 1, borderColor: '#21262D' },
+  bubbleAIText: { color: '#E2E8F0', fontSize: 14, lineHeight: 20 }
 });
 
 const styles = StyleSheet.create({
-  contentContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28 },
-  supportAvatar: { width: '100%', height: '100%', resizeMode: 'cover' },
-  telegramButton: { flexDirection: 'row', width: '100%', height: 54, backgroundColor: '#2AABEE', borderRadius: 16, justifyContent: 'center', alignItems: 'center', shadowColor: '#2AABEE', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 4 },
-  buttonDisabledDark: { backgroundColor: '#1E293B', shadowOpacity: 0 },
-  buttonDisabledLight: { backgroundColor: '#E2E8F0', shadowOpacity: 0 },
-  buttonIcon: { marginRight: 10 },
-  telegramButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
-  textDisabledDark: { color: '#94A3B8' },
-  textDisabledLight: { color: '#64748B' },
-  footer: { paddingBottom: Platform.OS === 'ios' ? 20 : 16, alignItems: 'center' }
+  backBtn: { padding: 4, width: 30 },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'center' },
+  headerIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E' },
+  statusText: { fontSize: 10, color: '#22C55E', fontWeight: '600' },
+  messagesList: { paddingHorizontal: 16, paddingVertical: 16, gap: 12 },
+  messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  messageRowUser: { justifyContent: 'flex-end' },
+  messageRowAI: { justifyContent: 'flex-start' },
+  aiAvatar: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' },
+  bubble: { maxWidth: '75%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleUser: { backgroundColor: '#3B82F6', borderBottomRightRadius: 4 },
+  bubbleUserText: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
+  typingRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
+  typingBubble: { paddingVertical: 12, paddingHorizontal: 16 },
+  sendBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', marginBottom: 2 },
+  sendBtnDisabled: { backgroundColor: '#94A3B8' }
 });
