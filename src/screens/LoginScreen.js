@@ -10,7 +10,8 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
-  Platform
+  Platform,
+  Image
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -541,7 +542,7 @@ export default function LoginScreen({ navigation }) {
 
       <View style={styles.content}>
         <View style={styles.logoContainer}>
-          <MaterialCommunityIcons name="wallet-membership" size={60} color="#3B82F6" />
+          <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
           <Text style={styles.logoText}>TaskEarn</Text>
           <Text style={styles.subtitleText}>Secure Task & Financial Platform</Text>
         </View>
@@ -797,6 +798,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   content: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
   logoContainer: { alignItems: 'center', marginBottom: 40 },
+  logoImage: { width: 80, height: 80, borderRadius: 18 },
   logoText: { fontSize: 28, fontWeight: 'bold', color: '#1E293B', marginTop: 10 },
   subtitleText: { fontSize: 13, color: '#64748B', marginTop: 4, fontWeight: '500' },
   inputContainer: { marginBottom: 20 },

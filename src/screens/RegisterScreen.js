@@ -13,7 +13,8 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
-  Platform
+  Platform,
+  Image
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
@@ -416,7 +417,7 @@ export default function RegisterScreen({ navigation, route }) {
               <Feather name="arrow-left" size={24} color="#fff" />
             </TouchableOpacity>
             <View style={styles.logoContainer}>
-              <MaterialCommunityIcons name="wallet-outline" size={40} color="#2563eb" />
+              <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
             </View>
             <Text style={styles.titleText}>Create Account</Text>
             <Text style={styles.subtitleText}>Join TaskEarn and start earning today</Text>
@@ -661,6 +662,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#334155',
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   titleText: {
     fontSize: 26,

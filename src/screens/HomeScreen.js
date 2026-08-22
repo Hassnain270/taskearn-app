@@ -12,7 +12,8 @@ import {
   Easing,
   ActivityIndicator,
   Platform,
-  Linking
+  Linking,
+  Image
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
@@ -284,7 +285,9 @@ export default function HomeScreen({ navigation, route }) {
 
       <View style={currentStyles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.logoBox}><Text style={styles.logoText}>T</Text></View>
+          <View style={styles.logoBox}>
+            <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
+          </View>
           <Text style={currentStyles.appTitle}>TaskEarn</Text>
         </View>
         <View style={styles.headerRight}>
@@ -512,8 +515,8 @@ const darkStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   scrollContainer: { paddingHorizontal: 16, paddingBottom: 120, flexGrow: 1 },
   headerLeft: { flexDirection: 'row', alignItems: 'center' },
-  logoBox: { backgroundColor: '#3B82F6', width: 28, height: 28, borderRadius: 6, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
-  logoText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  logoBox: { width: 28, height: 28, borderRadius: 6, justifyContent: 'center', alignItems: 'center', marginRight: 8, overflow: 'hidden' },
+  logoImage: { width: '100%', height: '100%' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerIcon: { padding: 4, marginLeft: 10 },
   profileRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, marginBottom: 12 },
