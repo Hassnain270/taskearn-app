@@ -40,8 +40,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "2a6e130e-2bc2-44b1-8b19-50ed7c794fc2"
+        "projectId": "e8bc001c-2858-4923-850a-3f08cd07748b"
       }
-    }
+    },
+    "owner": "taskearn-app"
   }
 }
