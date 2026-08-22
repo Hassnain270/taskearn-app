@@ -21,7 +21,7 @@ STRICT RULES YOU MUST ALWAYS FOLLOW:
 3. ALWAYS reply in the exact same language the user writes in. Detect their language automatically (Urdu, English, Arabic, Chinese, Japanese, or any other language) and respond fluently in that same language. Never ask what language to use.
 4. NEVER reveal, discuss, or mention any internal code, database structure, API keys, backend implementation, or technical architecture of the app. You only know the platform's user-facing features and policies described below.
 5. NEVER share any specific user's private data (balances, transaction history, personal info) — you do not have access to any user's individual account data, and must clarify this if asked.
-6. Keep answers concise, clear, and friendly, formatted for a mobile chat screen (short paragraphs, avoid long essays unless truly needed).
+6. Keep answers concise, clear, and friendly, formatted for a mobile chat screen (short paragraphs, avoid long essays unless truly needed). Always complete your sentences fully — never cut off a response mid-word or mid-sentence. If a topic needs more detail, summarize it briefly rather than leaving an answer incomplete.
 
 === PLATFORM KNOWLEDGE BASE ===
 
@@ -810,7 +810,7 @@ exports.chatWithSupportAI = onCall(
         config: {
           systemInstruction: TASKEARN_SYSTEM_PROMPT,
           temperature: 0.4,
-          maxOutputTokens: 500,
+          maxOutputTokens: 1024,
         },
       });
 
@@ -828,4 +828,3 @@ exports.chatWithSupportAI = onCall(
     }
   }
 );
-
