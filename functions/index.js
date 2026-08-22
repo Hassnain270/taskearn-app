@@ -686,11 +686,13 @@ exports.verifyEmailOTP = onCall(async (request) => {
 
 // Try these models in order. Each has its own separate daily rate-limit pool
 // on Groq, so if one is exhausted the next one is very likely still available.
-// This means a real AI reply is used almost always, instead of a canned message.
+// Updated August 2026: llama-3.3-70b-versatile, llama-3.1-8b-instant, and
+// gemma2-9b-it were all decommissioned by Groq. Using Groq's current
+// recommended replacements (the openai/gpt-oss family).
 const GROQ_MODEL_CHAIN = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "gemma2-9b-it",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3-32b",
 ];
 
 async function tryGroqModels(groq, messages, maxTokens) {
@@ -746,10 +748,6 @@ exports.chatWithSupportAI = onCall(
     } catch (error) {
       console.error("chatWithSupportAI Groq error (all models failed):", error);
 
-      // Last resort: every model in the chain is exhausted at the exact same
-      // moment. Ask the model chain once more, but only for a very short
-      // "system is busy" line translated into the user's own language. This
-      // stays truly universal for any language without a hardcoded phrase list.
       try {
         const translateMessages = [
           {
