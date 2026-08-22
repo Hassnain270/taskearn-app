@@ -32,17 +32,11 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash.png",
+          "image": "./assets/icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#1a1a1a"
         }
       ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "e8bc001c-2858-4923-850a-3f08cd07748b"
-      }
-    },
-    "owner": "taskearn-app"
+    ]
   }
 }
