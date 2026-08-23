@@ -1,4 +1,5 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const bip39 = require("bip39");
 const HDKey = require("hdkey");
@@ -97,6 +98,42 @@ function getVipTierByBalance(balance) {
   return null;
 }
 
+// Returns two millisecond-epoch UTC boundaries, both aligned to the app's
+// existing 9 PM PKT reset convention (the same clock time used for daily
+// task resets):
+//   - dayResetUtcMs: start of "today"
+//   - monthResetUtcMs: start of "this month" (the 1st of the current PKT
+//     month, at 9 PM PKT — so the new month doesn't begin, for counting
+//     purposes, until 9 PM PKT on the 1st, exactly mirroring the daily reset)
+function getPktResetBoundaries() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const pktNow = new Date(utcMs + 5 * 3600000);
+
+  let effectivePkt = new Date(pktNow);
+  if (pktNow.getUTCHours() < 21) {
+    effectivePkt.setUTCDate(effectivePkt.getUTCDate() - 1);
+  }
+
+  const dayResetPkt = new Date(Date.UTC(
+    effectivePkt.getUTCFullYear(),
+    effectivePkt.getUTCMonth(),
+    effectivePkt.getUTCDate(),
+    21, 0, 0
+  ));
+  const dayResetUtcMs = dayResetPkt.getTime() - 5 * 3600000 - now.getTimezoneOffset() * 60000;
+
+  const monthResetPkt = new Date(Date.UTC(
+    effectivePkt.getUTCFullYear(),
+    effectivePkt.getUTCMonth(),
+    1,
+    21, 0, 0
+  ));
+  const monthResetUtcMs = monthResetPkt.getTime() - 5 * 3600000 - now.getTimezoneOffset() * 60000;
+
+  return { dayResetUtcMs, monthResetUtcMs };
+}
+
 exports.calculateTeamStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
@@ -113,19 +150,6 @@ exports.calculateTeamStats = onCall(async (request) => {
     const usersSnapshot = await db.collection("users").get();
     const allUsers = usersSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
-    const getPkt9PmResetTimestamp = () => {
-      const now = new Date();
-      const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-      const pktNow = new Date(utcMs + 5 * 3600000);
-
-      let resetPkt = new Date(pktNow);
-      if (pktNow.getHours() < 21) resetPkt.setDate(resetPkt.getDate() - 1);
-      resetPkt.setHours(21, 0, 0, 0);
-
-      const resetUtcMs = resetPkt.getTime() - 5 * 3600000;
-      return resetUtcMs - now.getTimezoneOffset() * 60000;
-    };
-
     const getMemberTimestamp = (createdAt) => {
       if (!createdAt) return 0;
       if (typeof createdAt.toDate === "function") return createdAt.toDate().getTime();
@@ -135,11 +159,10 @@ exports.calculateTeamStats = onCall(async (request) => {
       return 0;
     };
 
-    const pkt9PmReset = getPkt9PmResetTimestamp();
-    const sevenDaysCutoff = pkt9PmReset - 7 * 24 * 60 * 60 * 1000;
+    const { dayResetUtcMs, monthResetUtcMs } = getPktResetBoundaries();
 
     let globalTodayCount = 0;
-    let globalWeekCount = 0;
+    let globalMonthCount = 0;
 
     const calculateSubTree = (refCode) => {
       const children = allUsers.filter((u) => u.referredBy === refCode);
@@ -147,8 +170,8 @@ exports.calculateTeamStats = onCall(async (request) => {
 
       children.forEach((c) => {
         const cTime = getMemberTimestamp(c.createdAt);
-        if (cTime >= pkt9PmReset) globalTodayCount++;
-        if (cTime >= sevenDaysCutoff) globalWeekCount++;
+        if (cTime >= dayResetUtcMs) globalTodayCount++;
+        if (cTime >= monthResetUtcMs) globalMonthCount++;
 
         const childCode = c.referralCode || c.referral || c.id.substring(0, 6).toUpperCase();
         count += calculateSubTree(childCode);
@@ -162,8 +185,8 @@ exports.calculateTeamStats = onCall(async (request) => {
 
     const processedDirects = directUsers.map((d) => {
       const dTime = getMemberTimestamp(d.createdAt);
-      if (dTime >= pkt9PmReset) globalTodayCount++;
-      if (dTime >= sevenDaysCutoff) globalWeekCount++;
+      if (dTime >= dayResetUtcMs) globalTodayCount++;
+      if (dTime >= monthResetUtcMs) globalMonthCount++;
 
       const childCode = d.referralCode || d.referral || d.id.substring(0, 6).toUpperCase();
       const subTreeCount = calculateSubTree(childCode);
@@ -178,10 +201,13 @@ exports.calculateTeamStats = onCall(async (request) => {
 
     return {
       success: true,
+      username: userData.username || "",
       totalTeamSize: totalNetworkCount,
       todayJoinings: globalTodayCount,
-      last7DaysJoinings: globalWeekCount,
+      monthlyJoinings: globalMonthCount,
       directMembersData: processedDirects,
+      referralCode: myRefCode,
+      balance: Number(userData.balance || 0),
     };
   } catch (error) {
     console.error("Error in calculateTeamStats:", error);
@@ -260,51 +286,62 @@ exports.requestWithdrawal = onCall(async (request) => {
   }
 });
 
+// ============================================
+// DEPOSIT SYSTEM (server-side verified, unique address per request)
+// ============================================
+
+async function createPendingDepositRecord(db, userId, network, address, expectedAmount) {
+  const depositRef = db.collection("depositAddresses").doc();
+  const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
+  await depositRef.set({
+    depositId: depositRef.id,
+    userId,
+    network,
+    address,
+    expectedAmount: Number(expectedAmount) || 0,
+    status: "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    expiresAt,
+  });
+  return { depositId: depositRef.id, expiresAt };
+}
+
 exports.generateDepositAddress = onCall(
   { secrets: ["TRON_MNEMONIC"] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
     const userId = request.auth.uid;
+    const amount = Number(request.data?.amount) || 0;
+    if (amount <= 0) throw new HttpsError("invalid-argument", "A valid deposit amount is required.");
+
     const db = admin.firestore();
 
     try {
-      const userRef = db.collection("users").doc(userId);
-      const userDoc = await userRef.get();
-
-      if (userDoc.exists && userDoc.data().tronAddress) {
-        return { tronAddress: userDoc.data().tronAddress };
-      }
-
       const mnemonic = process.env.TRON_MNEMONIC;
       if (!mnemonic) throw new HttpsError("internal", "Mnemonic secret not found.");
 
       const counterRef = db.collection("metadata").doc("wallet_counter");
-      let newAddress = "";
+      let assignedIndex = 0;
 
       await db.runTransaction(async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
-        let currentIndex = counterDoc.exists && counterDoc.data().currentIndex !== undefined ? counterDoc.data().currentIndex : 0;
-        let assignedIndex = userDoc.exists && userDoc.data().walletIndex !== undefined ? userDoc.data().walletIndex : null;
-
-        if (assignedIndex === null) {
-          currentIndex = currentIndex + 1;
-          assignedIndex = currentIndex;
-          transaction.set(counterRef, { currentIndex: assignedIndex }, { merge: true });
-        }
-
-        const seed = await bip39.mnemonicToSeed(mnemonic);
-        const hdwallet = HDKey.fromMasterSeed ? HDKey.fromMasterSeed(seed) : HDKey.default.fromMasterSeed(seed);
-        const childNode = hdwallet.derive(`m/44'/195'/0'/0/${assignedIndex}`);
-        const privateKeyHex = childNode.privateKey.toString("hex");
-
-        const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io" });
-        newAddress = tronWeb.address.fromPrivateKey(privateKeyHex);
-
-        transaction.set(userRef, { tronAddress: newAddress, walletIndex: assignedIndex }, { merge: true });
+        const currentIndex = counterDoc.exists && counterDoc.data().currentIndex !== undefined ? counterDoc.data().currentIndex : 0;
+        assignedIndex = currentIndex + 1;
+        transaction.set(counterRef, { currentIndex: assignedIndex }, { merge: true });
       });
 
-      return { tronAddress: newAddress };
+      const seed = await bip39.mnemonicToSeed(mnemonic);
+      const hdwallet = HDKey.fromMasterSeed ? HDKey.fromMasterSeed(seed) : HDKey.default.fromMasterSeed(seed);
+      const childNode = hdwallet.derive(`m/44'/195'/0'/0/${assignedIndex}`);
+      const privateKeyHex = childNode.privateKey.toString("hex");
+
+      const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io" });
+      const newAddress = tronWeb.address.fromPrivateKey(privateKeyHex);
+
+      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "TRC20", newAddress, amount);
+
+      return { address: newAddress, depositId, expiresAt };
     } catch (error) {
       console.error("Error generating TRC20 address:", error);
       throw new HttpsError("internal", error.message || "Address generation failed.");
@@ -318,43 +355,34 @@ exports.generateBEP20Address = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
     const userId = request.auth.uid;
+    const amount = Number(request.data?.amount) || 0;
+    if (amount <= 0) throw new HttpsError("invalid-argument", "A valid deposit amount is required.");
+
     const db = admin.firestore();
 
     try {
-      const userRef = db.collection("users").doc(userId);
-      const userDoc = await userRef.get();
-
-      if (userDoc.exists && userDoc.data().bep20Address) {
-        return { bep20Address: userDoc.data().bep20Address };
-      }
-
       const mnemonic = process.env.TRON_MNEMONIC;
       if (!mnemonic) throw new HttpsError("internal", "Mnemonic secret not found.");
 
       const counterRef = db.collection("metadata").doc("wallet_counter");
-      let newAddress = "";
+      let assignedIndex = 0;
 
       await db.runTransaction(async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
-        let currentIndex = counterDoc.exists && counterDoc.data().currentIndex !== undefined ? counterDoc.data().currentIndex : 0;
-        let assignedIndex = userDoc.exists && userDoc.data().walletIndex !== undefined ? userDoc.data().walletIndex : null;
-
-        if (assignedIndex === null) {
-          currentIndex = currentIndex + 1;
-          assignedIndex = currentIndex;
-          transaction.set(counterRef, { currentIndex: assignedIndex }, { merge: true });
-        }
-
-        const walletNode = ethers.HDNodeWallet.fromMnemonic(
-          ethers.Mnemonic.fromPhrase(mnemonic),
-          `m/44'/60'/0'/0/${assignedIndex}`
-        );
-
-        newAddress = walletNode.address;
-        transaction.set(userRef, { bep20Address: newAddress, walletIndex: assignedIndex }, { merge: true });
+        const currentIndex = counterDoc.exists && counterDoc.data().currentIndex !== undefined ? counterDoc.data().currentIndex : 0;
+        assignedIndex = currentIndex + 1;
+        transaction.set(counterRef, { currentIndex: assignedIndex }, { merge: true });
       });
 
-      return { bep20Address: newAddress };
+      const walletNode = ethers.HDNodeWallet.fromMnemonic(
+        ethers.Mnemonic.fromPhrase(mnemonic),
+        `m/44'/60'/0'/0/${assignedIndex}`
+      );
+      const newAddress = walletNode.address;
+
+      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "BEP20", newAddress, amount);
+
+      return { address: newAddress, depositId, expiresAt };
     } catch (error) {
       console.error("Error generating BEP20 address:", error);
       throw new HttpsError("internal", error.message || "Address generation failed.");
@@ -362,149 +390,209 @@ exports.generateBEP20Address = onCall(
   }
 );
 
-exports.processBlockchainDeposit = onCall(async (request) => {
-  const { userId, depositId, amount, txHash } = request.data || {};
-
-  if (!userId || !amount || Number(amount) <= 0) {
-    throw new HttpsError("invalid-argument", "Invalid deposit payload parameters.");
-  }
-
-  const db = admin.firestore();
+async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) {
   const userRef = db.collection("users").doc(userId);
-  const depositRef = db.collection("deposits").doc(depositId || db.collection("deposits").doc().id);
 
-  try {
-    await db.runTransaction(async (transaction) => {
-      const depositDoc = await transaction.get(depositRef);
-      if (depositDoc.exists && depositDoc.data().status === "approved") return;
+  await db.runTransaction(async (transaction) => {
+    const depositDoc = await transaction.get(depositDocRef);
+    if (depositDoc.exists && depositDoc.data().status === "confirmed") return;
 
-      const userDoc = await transaction.get(userRef);
-      if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+    const userDoc = await transaction.get(userRef);
+    if (!userDoc.exists) throw new Error("User account not found for deposit credit.");
 
-      const userData = userDoc.data();
-      const currentBalance = Number(userData.balance || 0);
-      const depositAmount = Number(amount);
-      const newBalance = Number((currentBalance + depositAmount).toFixed(2));
+    const userData = userDoc.data();
+    const currentBalance = Number(userData.balance || 0);
+    const depositAmount = Number(amount);
+    const newBalance = Number((currentBalance + depositAmount).toFixed(2));
 
-      const activeTier = getVipTierByBalance(newBalance);
-      const baseVipCapital = activeTier ? activeTier.minCapital : 0;
+    const isFirstDeposit = !userData.hasDeposited;
+    let welcomeBonusAmount = 0;
+    if (isFirstDeposit) {
+      welcomeBonusAmount = Number((depositAmount * 0.07).toFixed(2));
+    }
 
-      let welcomeBonusAmount = 0;
-      if (baseVipCapital > 0) {
-        welcomeBonusAmount = Number((baseVipCapital * 0.07).toFixed(2));
-      }
+    const finalUserBalance = Number((newBalance + welcomeBonusAmount).toFixed(2));
 
-      const finalUserBalance = Number((newBalance + welcomeBonusAmount).toFixed(2));
+    const activeTier = getVipTierByBalance(finalUserBalance);
+    const baseVipCapital = activeTier ? activeTier.minCapital : 0;
 
-      transaction.update(userRef, {
-        balance: finalUserBalance,
-        totalBalance: finalUserBalance,
-      });
+    transaction.update(userRef, {
+      balance: finalUserBalance,
+      totalBalance: finalUserBalance,
+      hasDeposited: true,
+    });
 
-      transaction.set(
-        depositRef,
-        {
-          depositId: depositRef.id,
-          userId: userId,
-          amount: depositAmount,
-          txHash: txHash || "",
-          status: "approved",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+    transaction.update(depositDocRef, {
+      status: "confirmed",
+      confirmedAmount: depositAmount,
+      confirmedTxHash: txHash || "",
+      confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-      const depTxRef = db.collection("transactions").doc();
-      transaction.set(depTxRef, {
-        transactionId: depTxRef.id,
+    const depTxRef = db.collection("transactions").doc();
+    transaction.set(depTxRef, {
+      transactionId: depTxRef.id,
+      userId: userId,
+      type: "DEPOSIT",
+      amount: depositAmount,
+      status: "approved",
+      title: "Deposit Confirmed",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (welcomeBonusAmount > 0) {
+      const bonusTxRef = db.collection("transactions").doc();
+      transaction.set(bonusTxRef, {
+        transactionId: bonusTxRef.id,
         userId: userId,
-        type: "DEPOSIT",
-        amount: depositAmount,
+        type: "WELCOME_BONUS",
+        amount: welcomeBonusAmount,
         status: "approved",
-        title: "Deposit Confirmed",
+        title: "Welcome Bonus (7%)",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+    }
 
-      if (welcomeBonusAmount > 0) {
-        const bonusTxRef = db.collection("transactions").doc();
-        transaction.set(bonusTxRef, {
-          transactionId: bonusTxRef.id,
-          userId: userId,
-          type: "WELCOME_BONUS",
-          amount: welcomeBonusAmount,
+    if (baseVipCapital > 0 && userData.referredBy) {
+      const level1Ref = db.collection("users").doc(userData.referredBy);
+      const level1Doc = await transaction.get(level1Ref);
+
+      if (level1Doc.exists) {
+        const level1Data = level1Doc.data();
+        const directBonus = Number((baseVipCapital * 0.10).toFixed(2));
+        const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
+
+        transaction.update(level1Ref, {
+          balance: level1NewBalance,
+          totalBalance: level1NewBalance,
+        });
+
+        const directBonusTxRef = db.collection("transactions").doc();
+        transaction.set(directBonusTxRef, {
+          transactionId: directBonusTxRef.id,
+          userId: userData.referredBy,
+          type: "DIRECT_REFERRAL_BONUS",
+          amount: directBonus,
+          fromUserId: userId,
           status: "approved",
-          title: "Welcome Bonus (7%)",
+          title: "Direct Referral Bonus (10%)",
           baseCapital: baseVipCapital,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-      }
 
-      if (baseVipCapital > 0 && userData.referredBy) {
-        const level1Ref = db.collection("users").doc(userData.referredBy);
-        const level1Doc = await transaction.get(level1Ref);
+        if (level1Data.referredBy) {
+          const level2Ref = db.collection("users").doc(level1Data.referredBy);
+          const level2Doc = await transaction.get(level2Ref);
 
-        if (level1Doc.exists) {
-          const level1Data = level1Doc.data();
-          const directBonus = Number((baseVipCapital * 0.10).toFixed(2));
-          const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
+          if (level2Doc.exists) {
+            const level2Data = level2Doc.data();
+            const indirectBonus = Number((baseVipCapital * 0.05).toFixed(2));
+            const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
 
-          transaction.update(level1Ref, {
-            balance: level1NewBalance,
-            totalBalance: level1NewBalance,
-          });
+            transaction.update(level2Ref, {
+              balance: level2NewBalance,
+              totalBalance: level2NewBalance,
+            });
 
-          const directBonusTxRef = db.collection("transactions").doc();
-          transaction.set(directBonusTxRef, {
-            transactionId: directBonusTxRef.id,
-            userId: userData.referredBy,
-            type: "DIRECT_REFERRAL_BONUS",
-            amount: directBonus,
-            fromUserId: userId,
-            status: "approved",
-            title: "Direct Referral Bonus (10%)",
-            baseCapital: baseVipCapital,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-
-          if (level1Data.referredBy) {
-            const level2Ref = db.collection("users").doc(level1Data.referredBy);
-            const level2Doc = await transaction.get(level2Ref);
-
-            if (level2Doc.exists) {
-              const level2Data = level2Doc.data();
-              const indirectBonus = Number((baseVipCapital * 0.05).toFixed(2));
-              const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
-
-              transaction.update(level2Ref, {
-                balance: level2NewBalance,
-                totalBalance: level2NewBalance,
-              });
-
-              const indirectBonusTxRef = db.collection("transactions").doc();
-              transaction.set(indirectBonusTxRef, {
-                transactionId: indirectBonusTxRef.id,
-                userId: level1Data.referredBy,
-                type: "INDIRECT_REFERRAL_BONUS",
-                amount: indirectBonus,
-                fromUserId: userId,
-                status: "approved",
-                title: "Indirect Referral Bonus (5%)",
-                baseCapital: baseVipCapital,
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
-            }
+            const indirectBonusTxRef = db.collection("transactions").doc();
+            transaction.set(indirectBonusTxRef, {
+              transactionId: indirectBonusTxRef.id,
+              userId: level1Data.referredBy,
+              type: "INDIRECT_REFERRAL_BONUS",
+              amount: indirectBonus,
+              fromUserId: userId,
+              status: "approved",
+              title: "Indirect Referral Bonus (5%)",
+              baseCapital: baseVipCapital,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
           }
         }
       }
-    });
+    }
+  });
+}
 
-    return { success: true, message: "Deposit processed and referral bonuses credited successfully." };
+async function checkTRC20OnChainServer(address, expectedAmount) {
+  try {
+    const response = await fetch(`https://api.trongrid.io/v1/accounts/${address}/transactions/trc20?limit=20`);
+    const data = await response.json();
+    if (!data.data || data.data.length === 0) return null;
+
+    const usdtContract = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+    for (const tx of data.data) {
+      if (tx.token_info?.address === usdtContract && tx.to === address) {
+        const receivedAmount = parseFloat(tx.value) / 1000000;
+        if (receivedAmount >= expectedAmount) {
+          return { amount: receivedAmount, txId: tx.transaction_id };
+        }
+      }
+    }
+    return null;
   } catch (error) {
-    console.error("Error in processBlockchainDeposit:", error);
-    if (error instanceof HttpsError) throw error;
-    throw new HttpsError("internal", error.message || "Deposit processing failed.");
+    console.error("TRC20 on-chain check error:", error);
+    return null;
   }
-});
+}
+
+async function checkBEP20OnChainServer(address, expectedAmount, apiKey) {
+  try {
+    const usdtContractBSC = "0x55d398326f99059ff775485246999027b3197955";
+    const response = await fetch(
+      `https://api.etherscan.io/v2/api?chainid=56&module=account&action=tokentx&contractaddress=${usdtContractBSC}&address=${address}&page=1&offset=20&sort=desc&apikey=${apiKey}`
+    );
+    const data = await response.json();
+    if (data.status !== "1" || !data.result || data.result.length === 0) return null;
+
+    for (const tx of data.result) {
+      if (tx.to.toLowerCase() === address.toLowerCase()) {
+        const receivedAmount = parseFloat(tx.value) / Math.pow(10, 18);
+        if (receivedAmount >= expectedAmount) {
+          return { amount: receivedAmount, txId: tx.hash };
+        }
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error("BEP20 on-chain check error:", error);
+    return null;
+  }
+}
+
+exports.checkPendingDeposits = onSchedule(
+  { schedule: "every 3 minutes", secrets: ["ETHERSCAN_API_KEY"] },
+  async () => {
+    const db = admin.firestore();
+    const apiKey = process.env.ETHERSCAN_API_KEY;
+
+    const pendingSnap = await db.collection("depositAddresses").where("status", "==", "pending").get();
+    if (pendingSnap.empty) return;
+
+    for (const docSnap of pendingSnap.docs) {
+      const data = docSnap.data();
+
+      if (data.expiresAt && Date.now() > data.expiresAt) {
+        await docSnap.ref.update({ status: "expired" });
+        continue;
+      }
+
+      let found = null;
+      if (data.network === "TRC20") {
+        found = await checkTRC20OnChainServer(data.address, data.expectedAmount);
+      } else if (data.network === "BEP20") {
+        found = await checkBEP20OnChainServer(data.address, data.expectedAmount, apiKey);
+      }
+
+      if (found) {
+        try {
+          await creditVerifiedDeposit(db, docSnap.ref, data.userId, found.amount, found.txId);
+        } catch (creditError) {
+          console.error(`Failed to credit deposit ${docSnap.id}:`, creditError);
+        }
+      }
+    }
+  }
+);
 
 exports.completeTask = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
@@ -557,18 +645,9 @@ exports.completeTask = onCall(async (request) => {
       let upgradeBonusGiven = 0;
       let newClaimedVipId = previousVipId;
 
-      // A VIP change only counts if the balance now qualifies for a HIGHER tier
-      // than the one already on record.
       if (currentTier && currentTier.id > previousVipId) {
-        // Always record the new tier, even if this is the user's first-ever
-        // VIP unlock (no bonus in that case, but we still need to remember it
-        // so that a REAL future upgrade compares against the correct tier).
         newClaimedVipId = currentTier.id;
 
-        // Upgrade bonus is only for a user who was ALREADY active on a real
-        // VIP tier and has now grown into a higher one. Unlocking a VIP tier
-        // for the very first time (previousVipId === 0, i.e. "No VIP" before)
-        // must NOT receive an upgrade bonus.
         if (previousVipId > 0) {
           const prevTier = VIP_TIERS.find((t) => t.id === previousVipId);
           const previousCapital = prevTier ? prevTier.minCapital : 0;

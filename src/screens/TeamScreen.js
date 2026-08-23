@@ -11,22 +11,25 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
 
 export default function TeamScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
 
   const [userUid, setUserUid] = useState(auth.currentUser?.uid || "739215");
+  const [username, setUsername] = useState("");
   const [referralCode, setReferralCode] = useState("");
   const [totalBalance, setTotalBalance] = useState(route?.params?.totalBalance || 0.0);
 
   const [directMembersData, setDirectMembersData] = useState([]);
   const [totalTeamSize, setTotalTeamSize] = useState(0);
   const [todayJoinings, setTodayJoinings] = useState(0);
-  const [last7DaysJoinings, setLast7DaysJoinings] = useState(0);
+  const [monthlyJoinings, setMonthlyJoinings] = useState(0);
 
   useEffect(() => {
     const fetchTeamStats = async () => {
@@ -35,14 +38,15 @@ export default function TeamScreen({ navigation, route }) {
         const result = await calculateStats();
         
         if (result.data) {
-          const { totalTeamSize, todayJoinings, last7DaysJoinings, directMembersData, referralCode, balance } = result.data;
+          const { totalTeamSize, todayJoinings, monthlyJoinings, directMembersData, referralCode, balance, username } = result.data;
           
           setTotalTeamSize(totalTeamSize || 0);
           setTodayJoinings(todayJoinings || 0);
-          setLast7DaysJoinings(last7DaysJoinings || 0);
+          setMonthlyJoinings(monthlyJoinings || 0);
           setDirectMembersData(directMembersData || []);
           if (referralCode) setReferralCode(referralCode);
           if (balance !== undefined) setTotalBalance(Number(balance));
+          if (username) setUsername(username);
         }
       } catch (error) {
         console.error("Backend Error:", error);
@@ -97,11 +101,16 @@ export default function TeamScreen({ navigation, route }) {
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Feather name="arrow-left" size={22} color={isDarkMode ? "#FFFFFF" : "#1E293B"} />
         </TouchableOpacity>
-        <Text style={currentStyles.headerTitle}>Team Report</Text>
+        <Text style={currentStyles.headerTitle}>
+          {username ? `${username}'s Team Report` : 'Team Report'}
+        </Text>
         <View style={{ width: 22 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContainer, { paddingBottom: 110 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
 
         <View style={styles.mainStatsCard}>
           <Text style={styles.mainStatsLabel}>TOTAL TEAM SIZE</Text>
@@ -130,10 +139,10 @@ export default function TeamScreen({ navigation, route }) {
 
           <View style={currentStyles.growthCard}>
             <View style={[styles.iconIndicator, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-              <Feather name="trending-up" size={16} color="#3B82F6" />
+              <Feather name="calendar" size={16} color="#3B82F6" />
             </View>
-            <Text style={styles.growthLabel}>Last 7 Days</Text>
-            <Text style={[styles.growthValue, { color: '#3B82F6' }]}>+{last7DaysJoinings}</Text>
+            <Text style={styles.growthLabel}>This Month</Text>
+            <Text style={[styles.growthValue, { color: '#3B82F6' }]}>+{monthlyJoinings}</Text>
           </View>
         </View>
 
@@ -175,7 +184,7 @@ export default function TeamScreen({ navigation, route }) {
 
       </ScrollView>
 
-      <View style={currentStyles.bottomTabNav}>
+      <View style={[currentStyles.bottomTabNav, { height: 65 + insets.bottom, paddingBottom: insets.bottom }]}>
         <TouchableOpacity style={styles.tabItem} onPress={() => navigation.navigate('Home', passState)}>
           <MaterialCommunityIcons name="home" size={24} color="#94A3B8" />
           <Text style={styles.tabText}>HOME</Text>
@@ -204,7 +213,7 @@ export default function TeamScreen({ navigation, route }) {
 const lightStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1E293B' },
+  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1E293B' },
   growthCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#F1F5F9' },
   promoCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, marginTop: 4, marginBottom: 20, borderWidth: 1, borderColor: '#F1F5F9' },
   promoTitle: { fontSize: 13, fontWeight: 'bold', color: '#1E293B', marginLeft: 8 },
@@ -215,13 +224,13 @@ const lightStyles = StyleSheet.create({
   memberUsername: { fontSize: 13, fontWeight: 'bold', color: '#334155', marginLeft: 10 },
   teamCountLabel: { fontSize: 12, color: '#64748B', fontWeight: '500' },
   emptyCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F1F5F9' },
-  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 65, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingBottom: 5 }
+  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0' }
 });
 
 const darkStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E14' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
   growthCard: { flex: 1, backgroundColor: '#161B22', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#21262D' },
   promoCard: { backgroundColor: '#161B22', borderRadius: 18, padding: 16, marginTop: 4, marginBottom: 20, borderWidth: 1, borderColor: '#21262D' },
   promoTitle: { fontSize: 13, fontWeight: 'bold', color: '#FFFFFF', marginLeft: 8 },
@@ -232,11 +241,11 @@ const darkStyles = StyleSheet.create({
   memberUsername: { fontSize: 13, fontWeight: 'bold', color: '#E2E8F0', marginLeft: 10 },
   teamCountLabel: { fontSize: 12, color: '#94A3B8', fontWeight: '500' },
   emptyCard: { backgroundColor: '#161B22', borderRadius: 14, padding: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#21262D' },
-  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 65, backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D', paddingBottom: 5 }
+  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D' }
 });
 
 const styles = StyleSheet.create({
-  scrollContainer: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 110 },
+  scrollContainer: { paddingHorizontal: 16, paddingTop: 4 },
   backBtn: { padding: 2 },
   mainStatsCard: { backgroundColor: '#3B82F6', borderRadius: 20, padding: 20, marginTop: 16, marginBottom: 12 },
   mainStatsLabel: { color: 'rgba(255, 255, 255, 0.75)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5, textAlign: 'center' },

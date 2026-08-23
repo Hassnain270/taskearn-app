@@ -5,6 +5,7 @@ global.Buffer = global.Buffer || Buffer;
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, Platform, ScrollView } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import * as Linking from 'expo-linking';
@@ -185,47 +186,49 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ThemeProvider>
-        <NavigationContainer linking={linking}>
-          <Stack.Navigator
-            initialRouteName={initialRouteName}
-            screenOptions={{
-              headerShown: false,
-              animationEnabled: false,
-              cardStyle: { backgroundColor: '#0B0E14' }
-            }}
-          >
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="Register" component={RegisterScreen} />
-            <Stack.Screen
-              name="Home"
-              component={HomeScreen}
-              initialParams={{
-                updatedBalance: 0.0,
-                totalBalance: 0.0,
-                todayEarnings: 0.0,
-                taskCount: 0,
-                recentActivities: []
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <NavigationContainer linking={linking}>
+            <Stack.Navigator
+              initialRouteName={initialRouteName}
+              screenOptions={{
+                headerShown: false,
+                animationEnabled: false,
+                cardStyle: { backgroundColor: '#0B0E14' }
               }}
-            />
-            <Stack.Screen name="Tasks" component={TasksScreen} />
-            <Stack.Screen name="AboutUs" component={AboutUsScreen} />
-            <Stack.Screen name="Notices" component={NoticesScreen} />
-            <Stack.Screen name="Invitation" component={InvitationScreen} />
-            <Stack.Screen name="Vip" component={VipScreen} />
-            <Stack.Screen name="Team" component={TeamScreen} />
-            <Stack.Screen name="Me" component={MeScreen} />
-            <Stack.Screen name="ProfileParticulars" component={ProfileParticularsScreen} />
-            <Stack.Screen name="Settlement" component={SettlementConfigScreen} />
-            <Stack.Screen name="WithdrawAssets" component={WithdrawAssetsScreen} />
-            <Stack.Screen name="History" component={HistoryScreen} />
-            <Stack.Screen name="Support" component={SupportScreen} />
-            <Stack.Screen name="SecurityScreen" component={SecurityScreen} />
-            <Stack.Screen name="Deposit" component={DepositScreen} />
-            <Stack.Screen name="AdminWithdrawalsScreen" component={AdminWithdrawalsScreen} />
-          </Stack.Navigator>
-        </NavigationContainer>
-      </ThemeProvider>
+            >
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Register" component={RegisterScreen} />
+              <Stack.Screen
+                name="Home"
+                component={HomeScreen}
+                initialParams={{
+                  updatedBalance: 0.0,
+                  totalBalance: 0.0,
+                  todayEarnings: 0.0,
+                  taskCount: 0,
+                  recentActivities: []
+                }}
+              />
+              <Stack.Screen name="Tasks" component={TasksScreen} />
+              <Stack.Screen name="AboutUs" component={AboutUsScreen} />
+              <Stack.Screen name="Notices" component={NoticesScreen} />
+              <Stack.Screen name="Invitation" component={InvitationScreen} />
+              <Stack.Screen name="Vip" component={VipScreen} />
+              <Stack.Screen name="Team" component={TeamScreen} />
+              <Stack.Screen name="Me" component={MeScreen} />
+              <Stack.Screen name="ProfileParticulars" component={ProfileParticularsScreen} />
+              <Stack.Screen name="Settlement" component={SettlementConfigScreen} />
+              <Stack.Screen name="WithdrawAssets" component={WithdrawAssetsScreen} />
+              <Stack.Screen name="History" component={HistoryScreen} />
+              <Stack.Screen name="Support" component={SupportScreen} />
+              <Stack.Screen name="SecurityScreen" component={SecurityScreen} />
+              <Stack.Screen name="Deposit" component={DepositScreen} />
+              <Stack.Screen name="AdminWithdrawalsScreen" component={AdminWithdrawalsScreen} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </ThemeProvider>
+      </SafeAreaProvider>
     </ErrorBoundary>
   );
 }
