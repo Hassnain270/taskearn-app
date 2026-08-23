@@ -81,11 +81,11 @@ export const checkBEP20Deposit = async (address, expectedAmount) => {
   try {
     // BSC Mainnet Official USDT Token Contract Address
     const usdtContractBSC = '0x55d398326f99059ff775485246999027b3197955';
-    // Free BscScan API Key or Public RPC Endpoint
-    const apiKey = 'YOUR_BSCSCAN_API_KEY'; // BscScan free tier API Key (Optional but recommended)
-    
+    // Etherscan API V2 (BscScan is now unified under Etherscan V2, chainid=56 is BNB Smart Chain)
+    const apiKey = 'RGF2S5GJ34PR84TF6FUGQNF2AJZ4EJ8B76';
+
     const response = await fetch(
-      `https://api.bscscan.com/api?module=account&action=tokentx&contractaddress=${usdtContractBSC}&address=${address}&page=1&offset=10&sort=desc&apikey=${apiKey}`
+      `https://api.etherscan.io/v2/api?chainid=56&module=account&action=tokentx&contractaddress=${usdtContractBSC}&address=${address}&page=1&offset=10&sort=desc&apikey=${apiKey}`
     );
     const data = await response.json();
 
