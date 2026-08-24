@@ -14,6 +14,7 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
@@ -21,6 +22,7 @@ import { ThemeContext } from '../../ThemeContext';
 
 export default function ProfileParticularsScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
 
   const [fullName, setFullName] = useState('');
   const [gender, setGender] = useState('');
@@ -199,7 +201,7 @@ export default function ProfileParticularsScreen({ navigation }) {
         )}
       </KeyboardAvoidingView>
 
-      <View style={currentStyles.footer}>
+      <View style={[currentStyles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity 
           style={[styles.saveButton, loading && { opacity: 0.7 }]} 
           onPress={handleSave}
@@ -224,7 +226,7 @@ const lightStyles = StyleSheet.create({
   textInput: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, height: 54, paddingHorizontal: 16, fontSize: 14, color: '#1E293B', fontWeight: '500' },
   genderBtn: { flex: 1, height: 46, backgroundColor: '#FFFFFF', borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   genderBtnText: { fontSize: 13, fontWeight: '600', color: '#64748B' },
-  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' }
+  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' }
 });
 
 const darkStyles = StyleSheet.create({
@@ -235,7 +237,7 @@ const darkStyles = StyleSheet.create({
   textInput: { backgroundColor: '#161B22', borderWidth: 1, borderColor: '#21262D', borderRadius: 16, height: 54, paddingHorizontal: 16, fontSize: 14, color: '#FFFFFF', fontWeight: '500' },
   genderBtn: { flex: 1, height: 46, backgroundColor: '#161B22', borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   genderBtnText: { fontSize: 13, fontWeight: '600', color: '#94A3B8' },
-  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#21262D' }
+  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#21262D' }
 });
 
 const styles = StyleSheet.create({

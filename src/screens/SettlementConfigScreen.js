@@ -14,6 +14,7 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { globalStore } from './globalStore';
 import { auth, db } from '../firebaseConfig';
@@ -22,6 +23,7 @@ import { ThemeContext } from '../../ThemeContext';
 
 export default function SettlementConfigScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
 
   const [network, setNetwork] = useState('TRC20');
   const [walletAddress, setWalletAddress] = useState('');
@@ -341,7 +343,7 @@ export default function SettlementConfigScreen({ navigation }) {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <View style={currentStyles.footer}>
+      <View style={[currentStyles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity
           style={[styles.actionButton, isWalletSaved && !isEditable ? styles.updateButtonColor : styles.saveButtonColor]}
           onPress={handleActionClick}
@@ -378,7 +380,7 @@ const lightStyles = StyleSheet.create({
   termsBox: { backgroundColor: '#FFF5F5', borderRadius: 16, padding: 16, marginTop: 8, borderWidth: 1, borderColor: '#FEE2E2', marginBottom: 20 },
   termsTitle: { fontSize: 11, fontWeight: '800', color: '#EF4444', letterSpacing: 0.5 },
   termsText: { fontSize: 11, color: '#991B1B', lineHeight: 17, fontWeight: '500', textAlign: 'justify' },
-  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' }
+  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' }
 });
 
 const darkStyles = StyleSheet.create({
@@ -399,7 +401,7 @@ const darkStyles = StyleSheet.create({
   termsBox: { backgroundColor: '#2D1517', borderRadius: 16, padding: 16, marginTop: 8, borderWidth: 1, borderColor: '#7F1D1D', marginBottom: 20 },
   termsTitle: { fontSize: 11, fontWeight: '800', color: '#F87171', letterSpacing: 0.5 },
   termsText: { fontSize: 11, color: '#FCA5A5', lineHeight: 17, fontWeight: '500', textAlign: 'justify' },
-  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#21262D' }
+  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#21262D' }
 });
 
 const styles = StyleSheet.create({

@@ -14,6 +14,7 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -24,6 +25,7 @@ const functionsInstance = getFunctions();
 
 export default function WithdrawAssetsScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
 
   const [incomingBalance, setIncomingBalance] = useState(route?.params?.totalBalance || 0.00);
   const [completedTaskCount, setCompletedTaskCount] = useState(route?.params?.taskCount || 0);
@@ -251,7 +253,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <View style={currentStyles.footer}>
+      <View style={[currentStyles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity
           style={[styles.actionButton, isButtonEnabled ? styles.activeButtonColor : currentStyles.disabledButtonColor]}
           onPress={handleWithdrawInitiate}
@@ -281,7 +283,7 @@ const lightStyles = StyleSheet.create({
   textInput: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, height: 54, paddingHorizontal: 16, fontSize: 14, color: '#1E293B', fontWeight: '600' },
   termsBox: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, marginTop: 10, borderWidth: 1, borderColor: '#E2E8F0' },
   termsTitle: { fontSize: 11, fontWeight: '700', color: '#1E293B', letterSpacing: 0.5 },
-  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
   disabledButtonColor: { backgroundColor: '#CBD5E1' }
 });
 
@@ -297,7 +299,7 @@ const darkStyles = StyleSheet.create({
   textInput: { backgroundColor: '#161B22', borderWidth: 1, borderColor: '#21262D', borderRadius: 16, height: 54, paddingHorizontal: 16, fontSize: 14, color: '#FFFFFF', fontWeight: '600' },
   termsBox: { backgroundColor: '#161B22', borderRadius: 16, padding: 18, marginTop: 10, borderWidth: 1, borderColor: '#21262D' },
   termsTitle: { fontSize: 11, fontWeight: '700', color: '#E2E8F0', letterSpacing: 0.5 },
-  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#21262D' },
+  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#21262D' },
   disabledButtonColor: { backgroundColor: '#21262D' }
 });
 
