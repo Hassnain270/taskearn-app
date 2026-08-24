@@ -369,6 +369,12 @@ export default function RegisterScreen({ navigation, route }) {
 
       const myNewReferralCode = generateReferralCode();
 
+      // NOTE: 'balance' (and other money/limit fields) are deliberately NOT
+      // set here. Firestore security rules forbid the client from creating
+      // its own document with a 'balance' field present — only the server
+      // (Cloud Functions, via the Admin SDK) is allowed to write balance,
+      // taskCount, earnings, etc. Every part of the app already treats a
+      // missing balance field as 0, so this has no functional effect.
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         username: cleanUsername,
@@ -378,7 +384,6 @@ export default function RegisterScreen({ navigation, route }) {
         countryName: selectedCountry.name,
         phoneDialCode: selectedCountry.dial_code,
         phoneNumber: formattedPhone,
-        balance: 0,
         referral: myNewReferralCode,
         referredBy: cleanRefCode,
         referredByUid: referrerUid,
