@@ -13,12 +13,14 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeContext } from '../../ThemeContext';
 import { functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 
 export default function LiveSupportScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
   const [messages, setMessages] = useState([
@@ -142,7 +144,7 @@ export default function LiveSupportScreen({ navigation }) {
           </View>
         )}
 
-        <View style={currentStyles.inputBar}>
+        <View style={[currentStyles.inputBar, { paddingBottom: 10 + insets.bottom }]}>
           <TextInput
             style={currentStyles.textInput}
             placeholder="Type your message..."
@@ -170,7 +172,7 @@ const lightStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#1E293B' },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9', gap: 8 },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9', gap: 8 },
   textInput: { flex: 1, backgroundColor: '#F8FAFC', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: '#1E293B', maxHeight: 100, borderWidth: 1, borderColor: '#F1F5F9' },
   bubbleAI: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F1F5F9' },
   bubbleAIText: { color: '#334155', fontSize: 14, lineHeight: 20 }
@@ -180,7 +182,7 @@ const darkStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E14' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#21262D' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#161B22', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#21262D', gap: 8 },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#161B22', paddingHorizontal: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#21262D', gap: 8 },
   textInput: { flex: 1, backgroundColor: '#0B0E14', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: '#E2E8F0', maxHeight: 100, borderWidth: 1, borderColor: '#21262D' },
   bubbleAI: { backgroundColor: '#161B22', borderWidth: 1, borderColor: '#21262D' },
   bubbleAIText: { color: '#E2E8F0', fontSize: 14, lineHeight: 20 }

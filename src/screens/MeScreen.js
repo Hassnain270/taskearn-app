@@ -11,6 +11,7 @@ import {
   Platform
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -19,6 +20,7 @@ import { ThemeContext } from '../../ThemeContext';
 
 export default function MeScreen({ navigation }) {
   const { isDarkMode, toggleTheme } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
 
   const [balance, setBalance] = useState(0.0);
   const [todayEarnings, setTodayEarnings] = useState(0.0);
@@ -172,7 +174,7 @@ export default function MeScreen({ navigation }) {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={styles.scrollContainer}
+        contentContainerStyle={[styles.scrollContainer, { paddingBottom: (Platform.OS === 'web' ? 140 : 110) + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
 
@@ -306,7 +308,7 @@ export default function MeScreen({ navigation }) {
 
       </ScrollView>
 
-      <View style={currentStyles.bottomTabNav}>
+      <View style={[currentStyles.bottomTabNav, { height: 65 + insets.bottom, paddingBottom: insets.bottom }]}>
         <TouchableOpacity style={styles.tabItem} activeOpacity={0.7} onPress={() => safeNavigate('Home')}>
           <MaterialCommunityIcons name="home" size={24} color="#94A3B8" />
           <Text style={styles.tabText}>HOME</Text>
@@ -361,7 +363,7 @@ const lightStyles = StyleSheet.create({
   optionTitle: { fontSize: 13, fontWeight: '600', color: '#334155' },
   divider: { height: 1, backgroundColor: '#F1F5F9', marginLeft: 58 },
   logoutButton: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 14, height: 48, justifyContent: 'center', alignItems: 'center', marginTop: 25, borderWidth: 1, borderColor: '#F1F5F9' },
-  bottomTabNav: { height: 65, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingBottom: 5 }
+  bottomTabNav: { backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0' }
 });
 
 const darkStyles = StyleSheet.create({
@@ -380,11 +382,11 @@ const darkStyles = StyleSheet.create({
   optionTitle: { fontSize: 13, fontWeight: '600', color: '#E2E8F0' },
   divider: { height: 1, backgroundColor: '#21262D', marginLeft: 58 },
   logoutButton: { flexDirection: 'row', backgroundColor: '#161B22', borderRadius: 14, height: 48, justifyContent: 'center', alignItems: 'center', marginTop: 25, borderWidth: 1, borderColor: '#21262D' },
-  bottomTabNav: { height: 65, backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D', paddingBottom: 5 }
+  bottomTabNav: { backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D' }
 });
 
 const styles = StyleSheet.create({
-  scrollContainer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: Platform.OS === 'web' ? 140 : 110 },
+  scrollContainer: { paddingHorizontal: 20, paddingTop: 10 },
   backBtn: { padding: 5 },
   avatarSection: { alignItems: 'center', marginTop: 20, marginBottom: 25 },
   vipBadge: { backgroundColor: '#EAB308', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, position: 'absolute', top: 58 },

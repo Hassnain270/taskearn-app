@@ -16,6 +16,7 @@ import {
   Image
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -149,6 +150,7 @@ const bannerData = [
 
 export default function HomeScreen({ navigation, route }) {
   const { isDarkMode, toggleTheme } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
   const [username, setUsername] = useState("Loading...");
   const [userUid, setUserUid] = useState("");
   const [loading, setLoading] = useState(true);
@@ -302,7 +304,7 @@ export default function HomeScreen({ navigation, route }) {
 
       <ScrollView 
         showsVerticalScrollIndicator={true} 
-        contentContainerStyle={styles.scrollContainer}
+        contentContainerStyle={[styles.scrollContainer, { paddingBottom: 120 + insets.bottom }]}
         style={Platform.OS === 'web' ? { flex: 1, overflowY: 'auto' } : { flex: 1 }}
       >
         <View style={styles.profileRow}>
@@ -427,7 +429,7 @@ export default function HomeScreen({ navigation, route }) {
 
       </ScrollView>
 
-      <View style={currentStyles.bottomTabNav}>
+      <View style={[currentStyles.bottomTabNav, { height: 65 + insets.bottom, paddingBottom: insets.bottom }]}>
         {[
           { icon: 'home', title: 'HOME' },
           { icon: 'account-group', title: 'TEAM' },
@@ -466,7 +468,6 @@ const lightStyles = StyleSheet.create({
   bannerDesc: { fontSize: 11, color: '#64748B', marginTop: 4, lineHeight: 16 },
   inactiveDot: { backgroundColor: '#E2E8F0' },
   bottomTabNav: { 
-    height: 65, 
     backgroundColor: '#FFFFFF', 
     flexDirection: 'row', 
     justifyContent: 'space-around', 
@@ -497,7 +498,6 @@ const darkStyles = StyleSheet.create({
   bannerDesc: { fontSize: 11, color: '#94A3B8', marginTop: 4, lineHeight: 16 },
   inactiveDot: { backgroundColor: '#334155' },
   bottomTabNav: { 
-    height: 65, 
     backgroundColor: '#161B22', 
     flexDirection: 'row', 
     justifyContent: 'space-around', 
@@ -513,7 +513,7 @@ const darkStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  scrollContainer: { paddingHorizontal: 16, paddingBottom: 120, flexGrow: 1 },
+  scrollContainer: { paddingHorizontal: 16, flexGrow: 1 },
   headerLeft: { flexDirection: 'row', alignItems: 'center' },
   logoBox: { width: 28, height: 28, borderRadius: 6, justifyContent: 'center', alignItems: 'center', marginRight: 8, overflow: 'hidden' },
   logoImage: { width: '100%', height: '100%' },
