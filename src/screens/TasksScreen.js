@@ -21,8 +21,6 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
 
 const functionsInstance = getFunctions();
-const CYCLE_KEY_STORAGE = 'taskCycleKey';
-const ACTIVITIES_STORAGE = 'taskRecentActivities';
 
 export default function TasksScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
@@ -47,6 +45,13 @@ export default function TasksScreen({ navigation }) {
   const [selectedProduct, setSelectedProduct] = useState({ name: '', icon: 'cart', price: 0 });
 
   const cycleKeyRef = useRef(null);
+
+  // Local activity storage is scoped per user UID, so different accounts
+  // logging into the same device (or the same account logging back in after
+  // signing out) never see stale or mixed-up data.
+  const currentUid = auth.currentUser?.uid || 'guest';
+  const CYCLE_KEY_STORAGE = `taskCycleKey_${currentUid}`;
+  const ACTIVITIES_STORAGE = `taskRecentActivities_${currentUid}`;
 
   const productPool = [
     { name: "iPhone 16 Pro Max (256GB)", icon: "cellphone", basePrice: 1199, color: '#3B82F6' },
@@ -90,8 +95,6 @@ export default function TasksScreen({ navigation }) {
     "Finalizing double-entry settlement report..."
   ];
 
-  // Returns a unique key identifying the current daily task cycle, aligned
-  // with the server's 4 PM UTC (9 PM PKT) daily reset boundary.
   const getCurrentCycleKey = () => {
     const now = new Date();
     let cycleStart = new Date();
@@ -102,8 +105,6 @@ export default function TasksScreen({ navigation }) {
     return cycleStart.toISOString();
   };
 
-  // Same boundary as a Date object, used to check whether the server's
-  // stored taskCount is stale (from before today's reset moment).
   const getCurrentDayBoundary = () => {
     const now = new Date();
     let boundary = new Date();
@@ -114,11 +115,6 @@ export default function TasksScreen({ navigation }) {
     return boundary;
   };
 
-  // The server only actually resets taskCount/todayEarnings the next time
-  // completeTask successfully runs. If the day has rolled over but the user
-  // hasn't completed a task yet today, the stored Firestore value is stale.
-  // We detect that here so the UI (and the "already completed" gate) reflect
-  // reality immediately, without waiting for a completed task to trigger it.
   const isStoredCountStale = () => {
     if (!lastTaskReset) return false;
     const boundary = getCurrentDayBoundary();
@@ -126,7 +122,6 @@ export default function TasksScreen({ navigation }) {
   };
 
   const effectiveTaskCount = isStoredCountStale() ? 0 : taskCount;
-  const effectiveTodayEarnings = isStoredCountStale() ? 0 : todayEarnings;
 
   useEffect(() => {
     let unsubscribeUser = () => {};
@@ -163,10 +158,11 @@ export default function TasksScreen({ navigation }) {
     };
   }, []);
 
-  // Local, device-only "Recent Activity" list. Persists across navigating
-  // away and back to this screen, but automatically clears itself once the
-  // daily task cycle rolls over — it never touches Firestore, so it never
-  // appears on the Home screen's global Transaction History.
+  // Local, per-user "Recent Activity" list. Persists across navigating away
+  // and back to this screen, and across logging out and back in on the same
+  // device — but automatically clears once the daily task cycle rolls over.
+  // It never touches Firestore, so it never appears on the Home screen's
+  // global Transaction History.
   useEffect(() => {
     const loadLocalActivities = async () => {
       try {
@@ -187,7 +183,7 @@ export default function TasksScreen({ navigation }) {
     };
 
     loadLocalActivities();
-  }, []);
+  }, [currentUid]);
 
   useEffect(() => {
     const updateTimer = () => {
@@ -213,7 +209,6 @@ export default function TasksScreen({ navigation }) {
         `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
       );
 
-      // Detect a live cycle rollover (app stayed open across the reset moment)
       const liveCycleKey = getCurrentCycleKey();
       if (cycleKeyRef.current && liveCycleKey !== cycleKeyRef.current) {
         cycleKeyRef.current = liveCycleKey;

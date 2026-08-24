@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext } from '../../ThemeContext';
 
 export default function MeScreen({ navigation }) {
@@ -104,21 +103,17 @@ export default function MeScreen({ navigation }) {
     }
   };
 
+  // Signing out only ends the Firebase Auth session. It deliberately does
+  // NOT wipe local device storage (AsyncStorage/localStorage), because that
+  // storage holds per-user-scoped data that needs to survive a logout:
+  // Passkey login credentials (keyed by uid) and today's local task activity
+  // cache (also keyed by uid). Wiping everything on logout previously broke
+  // both of those features.
   const performLogoutProcess = async () => {
     try {
       await signOut(auth);
     } catch (authErr) {
       console.log("Firebase SignOut Error:", authErr);
-    }
-
-    try {
-      await AsyncStorage.clear();
-      if (Platform.OS === 'web') {
-        localStorage.clear();
-        sessionStorage.clear();
-      }
-    } catch (storageErr) {
-      console.log("Storage Clear Error:", storageErr);
     }
 
     try {
