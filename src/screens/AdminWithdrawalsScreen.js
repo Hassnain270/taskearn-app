@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import {
   View,
   Text,
@@ -12,11 +12,15 @@ import {
   RefreshControl
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { db } from '../firebaseConfig';
-import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { db, functions } from '../firebaseConfig';
+import { collection, query, onSnapshot } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { ThemeContext } from '../../ThemeContext';
 
-export default function AdminWithdrawalsScreen({ navigation, route }) {
-  const isDarkMode = route?.params?.isDarkMode || false;
+export default function AdminWithdrawalsScreen({ navigation }) {
+  const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
   const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -49,7 +53,7 @@ export default function AdminWithdrawalsScreen({ navigation, route }) {
   const handleStatusUpdate = async (id, newStatus, userWallet, netPayout) => {
     Alert.alert(
       "Confirm Action",
-      `Are you sure you want to mark this withdrawal as ${newStatus.toUpperCase()}?\n\nNet Payout: $${netPayout}\nWallet: ${userWallet}`,
+      `Are you sure you want to mark this withdrawal as ${newStatus.toUpperCase()}?\n\nNet Payout: $${netPayout}\nWallet: ${userWallet}${newStatus === 'rejected' ? '\n\nThe held amount will be automatically refunded to the user.' : ''}`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -57,11 +61,8 @@ export default function AdminWithdrawalsScreen({ navigation, route }) {
           onPress: async () => {
             setProcessingId(id);
             try {
-              const ref = doc(db, "withdrawals", id);
-              await updateDoc(ref, {
-                status: newStatus,
-                updatedAt: new Date()
-              });
+              const updateStatus = httpsCallable(functions, 'updateWithdrawalStatus');
+              await updateStatus({ withdrawalId: id, newStatus });
               Alert.alert("Success", `Withdrawal request status updated to ${newStatus}.`);
             } catch (err) {
               Alert.alert("Error", err.message || "Failed to update status.");
@@ -124,7 +125,11 @@ export default function AdminWithdrawalsScreen({ navigation, route }) {
               onPress={() => handleStatusUpdate(item.id, 'rejected', item.walletAddress, item.netPayout)}
               disabled={processingId === item.id}
             >
-              <Text style={styles.btnText}>Reject</Text>
+              {processingId === item.id ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.btnText}>Reject</Text>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -164,7 +169,7 @@ export default function AdminWithdrawalsScreen({ navigation, route }) {
           data={withdrawals}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.listContainer}
+          contentContainerStyle={[styles.listContainer, { paddingBottom: 16 + insets.bottom }]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => setRefreshing(true)} />
           }

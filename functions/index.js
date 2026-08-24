@@ -98,13 +98,6 @@ function getVipTierByBalance(balance) {
   return null;
 }
 
-// Returns two millisecond-epoch UTC boundaries, both aligned to the app's
-// existing 9 PM PKT reset convention (the same clock time used for daily
-// task resets):
-//   - dayResetUtcMs: start of "today"
-//   - monthResetUtcMs: start of "this month" (the 1st of the current PKT
-//     month, at 9 PM PKT — so the new month doesn't begin, for counting
-//     purposes, until 9 PM PKT on the 1st, exactly mirroring the daily reset)
 function getPktResetBoundaries() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -283,6 +276,97 @@ exports.requestWithdrawal = onCall(async (request) => {
     console.error("Error in requestWithdrawal:", error);
     if (error instanceof HttpsError) throw error;
     throw new HttpsError("internal", error.message || "Failed to submit withdrawal request.");
+  }
+});
+
+// Secure admin-only withdrawal approval/rejection. The caller's admin status
+// is verified server-side (never trusts the client), and rejecting a
+// withdrawal automatically refunds the held amount back to the user's
+// balance. Both outcomes create a "transactions" record so they show up in
+// the user's History screen.
+exports.updateWithdrawalStatus = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const adminUid = request.auth.uid;
+  const { withdrawalId, newStatus } = request.data || {};
+
+  if (!withdrawalId || !["completed", "rejected"].includes(newStatus)) {
+    throw new HttpsError("invalid-argument", "A valid withdrawalId and newStatus ('completed' or 'rejected') are required.");
+  }
+
+  const db = admin.firestore();
+
+  const adminDoc = await db.collection("users").doc(adminUid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may approve or reject withdrawals.");
+  }
+
+  const withdrawalRef = db.collection("withdrawals").doc(withdrawalId);
+
+  try {
+    await db.runTransaction(async (transaction) => {
+      const withdrawalDoc = await transaction.get(withdrawalRef);
+      if (!withdrawalDoc.exists) throw new HttpsError("not-found", "Withdrawal request not found.");
+
+      const withdrawalData = withdrawalDoc.data();
+      if (withdrawalData.status !== "pending") {
+        throw new HttpsError("failed-precondition", "This withdrawal request has already been processed.");
+      }
+
+      const targetUserId = withdrawalData.userId;
+      const userRef = db.collection("users").doc(targetUserId);
+
+      transaction.update(withdrawalRef, {
+        status: newStatus,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        processedBy: adminUid,
+      });
+
+      if (newStatus === "rejected") {
+        const userDoc = await transaction.get(userRef);
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          const refundAmount = Number(withdrawalData.amount || 0);
+          const currentBalance = Number(userData.balance || userData.totalBalance || 0);
+          const refundedBalance = Number((currentBalance + refundAmount).toFixed(2));
+
+          transaction.update(userRef, {
+            balance: refundedBalance,
+            totalBalance: refundedBalance,
+          });
+
+          const refundTxRef = db.collection("transactions").doc();
+          transaction.set(refundTxRef, {
+            transactionId: refundTxRef.id,
+            userId: targetUserId,
+            type: "WITHDRAWAL_REJECTED_REFUND",
+            amount: refundAmount,
+            status: "approved",
+            title: "Withdrawal Rejected - Refunded",
+            isCredit: true,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        const completedTxRef = db.collection("transactions").doc();
+        transaction.set(completedTxRef, {
+          transactionId: completedTxRef.id,
+          userId: targetUserId,
+          type: "WITHDRAWAL",
+          amount: Number(withdrawalData.amount || 0),
+          status: "approved",
+          title: "Withdrawal Completed",
+          isCredit: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    });
+
+    return { success: true, message: `Withdrawal ${newStatus} successfully.` };
+  } catch (error) {
+    console.error("Error in updateWithdrawalStatus:", error);
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError("internal", error.message || "Failed to update withdrawal status.");
   }
 });
 
