@@ -140,6 +140,13 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
     }
   };
 
+  const handleWalletBoxPress = () => {
+    if (hasWallet) return; // already configured — box is display-only
+    if (navigation && typeof navigation.navigate === 'function') {
+      navigation.navigate('Settlement');
+    }
+  };
+
   return (
     <SafeAreaView style={currentStyles.container}>
       <StatusBar
@@ -177,7 +184,11 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
             <Text style={styles.inputLabel}>
               DESTINATION WALLET ({hasWallet ? walletNetwork : 'TRC20 / BEP20'})
             </Text>
-            <View style={[currentStyles.disabledInputWrapper, !hasWallet && { borderColor: '#EF4444', backgroundColor: isDarkMode ? '#241215' : '#FEF2F2' }]}>
+            <TouchableOpacity
+              activeOpacity={hasWallet ? 1 : 0.7}
+              onPress={handleWalletBoxPress}
+              style={[currentStyles.disabledInputWrapper, !hasWallet && { borderColor: '#EF4444', backgroundColor: isDarkMode ? '#241215' : '#FEF2F2' }]}
+            >
               <MaterialCommunityIcons
                 name="wallet"
                 size={18}
@@ -188,10 +199,14 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
                 style={[currentStyles.disabledInputText, !hasWallet && { color: '#EF4444', fontWeight: '700' }]}
                 numberOfLines={1}
               >
-                {hasWallet ? walletAddress : "No Wallet Configured"}
+                {hasWallet ? walletAddress : "No Wallet Configured — Tap to Add"}
               </Text>
-              <Feather name="lock" size={14} color={hasWallet ? "#10B981" : "#EF4444"} style={{ marginLeft: 'auto' }} />
-            </View>
+              {hasWallet ? (
+                <Feather name="lock" size={14} color="#10B981" style={{ marginLeft: 'auto' }} />
+              ) : (
+                <Feather name="chevron-right" size={16} color="#EF4444" style={{ marginLeft: 'auto' }} />
+              )}
+            </TouchableOpacity>
           </View>
 
           <View style={styles.inputGroup}>
