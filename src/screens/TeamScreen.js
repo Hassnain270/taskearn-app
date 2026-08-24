@@ -143,9 +143,10 @@ export default function TeamScreen({ navigation, route }) {
             <View style={[styles.iconIndicator, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
               <Feather name="calendar" size={16} color="#3B82F6" />
             </View>
-            <Text style={styles.growthLabel}>This Month</Text>
+            <Text style={styles.growthLabel}>
+              This Month{monthLabel ? ` (${monthLabel})` : ''}
+            </Text>
             <Text style={[styles.growthValue, { color: '#3B82F6' }]}>+{monthlyJoinings}</Text>
-            {monthLabel ? <Text style={styles.monthRangeText}>{monthLabel}</Text> : null}
           </View>
         </View>
 
@@ -260,9 +261,8 @@ const styles = StyleSheet.create({
   subStatValue: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginTop: 2 },
   gridRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   iconIndicator: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  growthLabel: { color: '#94A3B8', fontSize: 11, fontWeight: '600' },
-  growthValue: { fontSize: 18, fontWeight: 'bold', marginTop: 2 },
-  monthRangeText: { fontSize: 9, fontWeight: '600', color: '#94A3B8', marginTop: 4 },
+  growthLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '600' },
+  growthValue: { fontSize: 18, fontWeight: 'bold', marginTop: 4 },
   promoHeaderRow: { flexDirection: 'row', alignItems: 'center' },
   inviteButton: { backgroundColor: '#2563EB', height: 42, borderRadius: 10, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
   inviteButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: 'bold' },

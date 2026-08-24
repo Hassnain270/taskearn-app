@@ -84,7 +84,7 @@ const VIP_TIERS = [
   { id: 1,  minCapital: 70,    name: "VIP 1" },
 ];
 
-const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function calculateVipLockedCapital(balance) {
   for (const tier of VIP_TIERS) {
@@ -129,7 +129,8 @@ function getPktResetBoundaries() {
   const effectiveYear = effectivePkt.getUTCFullYear();
   const effectiveMonth = effectivePkt.getUTCMonth();
   const lastDateOfMonth = new Date(Date.UTC(effectiveYear, effectiveMonth + 1, 0)).getUTCDate();
-  const monthLabel = `${MONTH_NAMES[effectiveMonth]} 1 - ${MONTH_NAMES[effectiveMonth]} ${lastDateOfMonth}, ${effectiveYear}`;
+  const monthAbbr = MONTH_ABBR[effectiveMonth];
+  const monthLabel = `01 ${monthAbbr} - ${String(lastDateOfMonth).padStart(2, "0")} ${monthAbbr}, ${effectiveYear}`;
 
   return { dayResetUtcMs, monthResetUtcMs, monthLabel };
 }
