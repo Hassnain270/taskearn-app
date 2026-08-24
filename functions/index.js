@@ -84,6 +84,8 @@ const VIP_TIERS = [
   { id: 1,  minCapital: 70,    name: "VIP 1" },
 ];
 
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 function calculateVipLockedCapital(balance) {
   for (const tier of VIP_TIERS) {
     if (balance >= tier.minCapital) return tier.minCapital;
@@ -124,7 +126,12 @@ function getPktResetBoundaries() {
   ));
   const monthResetUtcMs = monthResetPkt.getTime() - 5 * 3600000 - now.getTimezoneOffset() * 60000;
 
-  return { dayResetUtcMs, monthResetUtcMs };
+  const effectiveYear = effectivePkt.getUTCFullYear();
+  const effectiveMonth = effectivePkt.getUTCMonth();
+  const lastDateOfMonth = new Date(Date.UTC(effectiveYear, effectiveMonth + 1, 0)).getUTCDate();
+  const monthLabel = `${MONTH_NAMES[effectiveMonth]} 1 - ${MONTH_NAMES[effectiveMonth]} ${lastDateOfMonth}, ${effectiveYear}`;
+
+  return { dayResetUtcMs, monthResetUtcMs, monthLabel };
 }
 
 exports.calculateTeamStats = onCall(async (request) => {
@@ -152,7 +159,7 @@ exports.calculateTeamStats = onCall(async (request) => {
       return 0;
     };
 
-    const { dayResetUtcMs, monthResetUtcMs } = getPktResetBoundaries();
+    const { dayResetUtcMs, monthResetUtcMs, monthLabel } = getPktResetBoundaries();
 
     let globalTodayCount = 0;
     let globalMonthCount = 0;
@@ -198,6 +205,7 @@ exports.calculateTeamStats = onCall(async (request) => {
       totalTeamSize: totalNetworkCount,
       todayJoinings: globalTodayCount,
       monthlyJoinings: globalMonthCount,
+      monthLabel: monthLabel,
       directMembersData: processedDirects,
       referralCode: myRefCode,
       balance: Number(userData.balance || 0),
@@ -279,11 +287,6 @@ exports.requestWithdrawal = onCall(async (request) => {
   }
 });
 
-// Secure admin-only withdrawal approval/rejection. The caller's admin status
-// is verified server-side (never trusts the client), and rejecting a
-// withdrawal automatically refunds the held amount back to the user's
-// balance. Both outcomes create a "transactions" record so they show up in
-// the user's History screen.
 exports.updateWithdrawalStatus = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 

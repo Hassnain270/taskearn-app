@@ -30,6 +30,7 @@ export default function TeamScreen({ navigation, route }) {
   const [totalTeamSize, setTotalTeamSize] = useState(0);
   const [todayJoinings, setTodayJoinings] = useState(0);
   const [monthlyJoinings, setMonthlyJoinings] = useState(0);
+  const [monthLabel, setMonthLabel] = useState("");
 
   useEffect(() => {
     const fetchTeamStats = async () => {
@@ -38,11 +39,12 @@ export default function TeamScreen({ navigation, route }) {
         const result = await calculateStats();
         
         if (result.data) {
-          const { totalTeamSize, todayJoinings, monthlyJoinings, directMembersData, referralCode, balance, username } = result.data;
+          const { totalTeamSize, todayJoinings, monthlyJoinings, monthLabel, directMembersData, referralCode, balance, username } = result.data;
           
           setTotalTeamSize(totalTeamSize || 0);
           setTodayJoinings(todayJoinings || 0);
           setMonthlyJoinings(monthlyJoinings || 0);
+          if (monthLabel) setMonthLabel(monthLabel);
           setDirectMembersData(directMembersData || []);
           if (referralCode) setReferralCode(referralCode);
           if (balance !== undefined) setTotalBalance(Number(balance));
@@ -143,6 +145,7 @@ export default function TeamScreen({ navigation, route }) {
             </View>
             <Text style={styles.growthLabel}>This Month</Text>
             <Text style={[styles.growthValue, { color: '#3B82F6' }]}>+{monthlyJoinings}</Text>
+            {monthLabel ? <Text style={styles.monthRangeText}>{monthLabel}</Text> : null}
           </View>
         </View>
 
@@ -259,6 +262,7 @@ const styles = StyleSheet.create({
   iconIndicator: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   growthLabel: { color: '#94A3B8', fontSize: 11, fontWeight: '600' },
   growthValue: { fontSize: 18, fontWeight: 'bold', marginTop: 2 },
+  monthRangeText: { fontSize: 9, fontWeight: '600', color: '#94A3B8', marginTop: 4 },
   promoHeaderRow: { flexDirection: 'row', alignItems: 'center' },
   inviteButton: { backgroundColor: '#2563EB', height: 42, borderRadius: 10, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
   inviteButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: 'bold' },

@@ -32,6 +32,7 @@ export default function TasksScreen({ navigation }) {
   const [todayEarnings, setTodayEarnings] = useState(0.0);
   const [totalEarnings, setTotalEarnings] = useState(0.0);
   const [taskCount, setTaskCount] = useState(0);
+  const [lastTaskReset, setLastTaskReset] = useState(null);
   const [recentActivities, setRecentActivities] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -101,6 +102,32 @@ export default function TasksScreen({ navigation }) {
     return cycleStart.toISOString();
   };
 
+  // Same boundary as a Date object, used to check whether the server's
+  // stored taskCount is stale (from before today's reset moment).
+  const getCurrentDayBoundary = () => {
+    const now = new Date();
+    let boundary = new Date();
+    boundary.setUTCHours(16, 0, 0, 0);
+    if (now.getTime() < boundary.getTime()) {
+      boundary.setUTCDate(boundary.getUTCDate() - 1);
+    }
+    return boundary;
+  };
+
+  // The server only actually resets taskCount/todayEarnings the next time
+  // completeTask successfully runs. If the day has rolled over but the user
+  // hasn't completed a task yet today, the stored Firestore value is stale.
+  // We detect that here so the UI (and the "already completed" gate) reflect
+  // reality immediately, without waiting for a completed task to trigger it.
+  const isStoredCountStale = () => {
+    if (!lastTaskReset) return false;
+    const boundary = getCurrentDayBoundary();
+    return lastTaskReset.getTime() < boundary.getTime();
+  };
+
+  const effectiveTaskCount = isStoredCountStale() ? 0 : taskCount;
+  const effectiveTodayEarnings = isStoredCountStale() ? 0 : todayEarnings;
+
   useEffect(() => {
     let unsubscribeUser = () => {};
     const currentUser = auth.currentUser;
@@ -114,6 +141,14 @@ export default function TasksScreen({ navigation }) {
           setTodayEarnings(Number(data.todayEarnings || 0));
           setTotalEarnings(Number(data.totalEarnings || 0));
           setTaskCount(Number(data.taskCount || 0));
+          if (data.lastTaskReset) {
+            const resetDate = typeof data.lastTaskReset.toDate === 'function'
+              ? data.lastTaskReset.toDate()
+              : new Date(data.lastTaskReset);
+            setLastTaskReset(resetDate);
+          } else {
+            setLastTaskReset(null);
+          }
         }
         setLoading(false);
       }, () => {
@@ -195,7 +230,7 @@ export default function TasksScreen({ navigation }) {
   }, []);
 
   const handleGrabOrder = () => {
-    if (taskCount >= 5) return;
+    if (effectiveTaskCount >= 5) return;
 
     if (balance < 70) {
       setShowInsufficientBalanceModal(true);
@@ -321,9 +356,9 @@ export default function TasksScreen({ navigation }) {
                 <Text style={styles.progressBadgeText}>5x Daily</Text>
               </View>
             </View>
-            <Text style={currentStyles.progressValue}>{taskCount} / 5</Text>
+            <Text style={currentStyles.progressValue}>{effectiveTaskCount} / 5</Text>
             <View style={currentStyles.progressBarTrack}>
-              <View style={[styles.progressBarFill, { width: `${(taskCount / 5) * 100}%` }]} />
+              <View style={[styles.progressBarFill, { width: `${(effectiveTaskCount / 5) * 100}%` }]} />
             </View>
             <View style={styles.timerRow}>
               <MaterialCommunityIcons name="clock-outline" size={14} color="#3B82F6" />
@@ -367,18 +402,18 @@ export default function TasksScreen({ navigation }) {
                 <Text style={currentStyles.workSub}>Click the button below to grab your daily e-commerce verification tasks.</Text>
 
                 <TouchableOpacity
-                  style={[styles.grabBtn, taskCount >= 5 && styles.disabledBtn]}
+                  style={[styles.grabBtn, effectiveTaskCount >= 5 && styles.disabledBtn]}
                   onPress={handleGrabOrder}
-                  disabled={taskCount >= 5}
+                  disabled={effectiveTaskCount >= 5}
                   activeOpacity={0.85}
                 >
                   <MaterialCommunityIcons
-                    name={taskCount >= 5 ? "check-circle" : "cart-arrow-right"}
+                    name={effectiveTaskCount >= 5 ? "check-circle" : "cart-arrow-right"}
                     size={18}
                     color="#FFFFFF"
                     style={{ marginRight: 8 }}
                   />
-                  <Text style={styles.grabBtnText}>{taskCount >= 5 ? "ALL TASKS COMPLETED" : "Grab Order Now"}</Text>
+                  <Text style={styles.grabBtnText}>{effectiveTaskCount >= 5 ? "ALL TASKS COMPLETED" : "Grab Order Now"}</Text>
                 </TouchableOpacity>
               </>
             )}
