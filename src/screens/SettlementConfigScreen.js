@@ -16,7 +16,6 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { globalStore } from './globalStore';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { ThemeContext } from '../../ThemeContext';
@@ -30,9 +29,13 @@ export default function SettlementConfigScreen({ navigation }) {
   const [isWalletSaved, setIsWalletSaved] = useState(false);
   const [isEditable, setIsEditable] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
+  // Firestore is the ONLY source of truth for a user's wallet address — no
+  // client-side cache is used, since a shared cache would leak one user's
+  // wallet address into another user's session on the same device.
   useEffect(() => {
     const fetchFirestoreWallet = async () => {
       try {
@@ -42,13 +45,11 @@ export default function SettlementConfigScreen({ navigation }) {
           if (userDoc.exists()) {
             const data = userDoc.data();
             if (data.walletAddress) {
-              const savedNet = data.walletNetwork || 'TRC20';
-              globalStore.walletAddress = data.walletAddress;
-              globalStore.walletNetwork = savedNet;
               setWalletAddress(data.walletAddress);
-              setNetwork(savedNet);
+              setNetwork(data.walletNetwork || 'TRC20');
               setIsWalletSaved(true);
               setIsEditable(false);
+              setInitialLoading(false);
               return;
             }
           }
@@ -57,10 +58,13 @@ export default function SettlementConfigScreen({ navigation }) {
         console.log("Error fetching wallet address:", err);
       }
 
-      setWalletAddress(globalStore.walletAddress || '');
-      setNetwork(globalStore.walletNetwork || 'TRC20');
-      setIsWalletSaved(globalStore.walletAddress ? true : false);
-      setIsEditable(globalStore.walletAddress ? false : true);
+      // No wallet configured yet for this user — start fresh, never fall
+      // back to any other value.
+      setWalletAddress('');
+      setNetwork('TRC20');
+      setIsWalletSaved(false);
+      setIsEditable(true);
+      setInitialLoading(false);
     };
 
     fetchFirestoreWallet();
@@ -207,9 +211,6 @@ export default function SettlementConfigScreen({ navigation }) {
         });
       }
 
-      globalStore.walletAddress = trimmedAddress;
-      globalStore.walletNetwork = network;
-
       setIsWalletSaved(true);
       setIsEditable(false);
 
@@ -255,6 +256,11 @@ export default function SettlementConfigScreen({ navigation }) {
         <View style={{ width: 36 }} />
       </View>
 
+      {initialLoading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#2563EB" />
+        </View>
+      ) : (
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
@@ -342,12 +348,13 @@ export default function SettlementConfigScreen({ navigation }) {
 
         </ScrollView>
       </KeyboardAvoidingView>
+      )}
 
       <View style={[currentStyles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity
           style={[styles.actionButton, isWalletSaved && !isEditable ? styles.updateButtonColor : styles.saveButtonColor]}
           onPress={handleActionClick}
-          disabled={loading}
+          disabled={loading || initialLoading}
         >
           {loading ? (
             <ActivityIndicator color="#FFFFFF" />
@@ -406,6 +413,7 @@ const darkStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   scrollContainer: { paddingHorizontal: 20, paddingTop: 25 },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   alertHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   inputGroup: { marginBottom: 24 },
   networkSelectorRow: { flexDirection: 'row', gap: 12 },
