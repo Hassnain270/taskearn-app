@@ -880,7 +880,7 @@ async function sweepTRC20Deposit(mnemonic, derivationIndex) {
 }
 
 exports.checkPendingDeposits = onSchedule(
-  { schedule: "every 3 minutes", secrets: ["TRON_MNEMONIC"] },
+  { schedule: "every 1 minutes", secrets: ["TRON_MNEMONIC"] },
   async () => {
     const db = admin.firestore();
     const mnemonic = process.env.TRON_MNEMONIC;
