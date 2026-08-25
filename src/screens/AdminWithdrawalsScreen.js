@@ -123,15 +123,15 @@ export default function AdminWithdrawalsScreen({ navigation }) {
   };
 
   const handleApprovePress = (item) => {
-    Alert.alert(
-      "Confirm Approval",
-      `Approve withdrawal of $${Number(item.netPayout || item.amount).toFixed(2)} for ${item.username}?\n\nMake sure you have already sent the funds to their wallet before confirming.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Confirm", onPress: () => performApprove(item.id) }
-      ]
-    );
-  };
+  Alert.alert(
+    "Confirm Approval",
+    `Approve withdrawal of $${Number(item.netPayout || item.amount).toFixed(2)} for ${item.username}?\n\nFunds will be sent automatically from the master wallet to their address. This cannot be undone.`,
+    [
+      { text: "Cancel", style: "cancel" },
+      { text: "Confirm", onPress: () => performApprove(item.id) }
+    ]
+  );
+};
 
   const openRejectModal = (id) => {
     setRejectModal({ visible: true, id, reason: '' });

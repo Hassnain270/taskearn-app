@@ -428,95 +428,222 @@ exports.requestWithdrawal = onCall(async (request) => {
   }
 });
 
-exports.updateWithdrawalStatus = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+// ---------- AUTOMATIC WITHDRAWAL PAYOUT (master wallet -> user's wallet) ----------
 
-  const adminUid = request.auth.uid;
-  const { withdrawalId, newStatus, reason } = request.data || {};
+const BSC_RPC = "https://bsc-dataseed.binance.org/";
+const USDT_BSC_CONTRACT = "0x55d398326f99059ff775485246999027b3197955";
+const USDT_TRC20_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+const ERC20_ABI = [
+  "function transfer(address to, uint amount) returns (bool)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+];
 
-  if (!withdrawalId || !["completed", "rejected"].includes(newStatus)) {
-    throw new HttpsError("invalid-argument", "A valid withdrawalId and newStatus ('completed' or 'rejected') are required.");
+async function sendBEP20Payout(mnemonic, toAddress, amount) {
+  const provider = new ethers.JsonRpcProvider(BSC_RPC);
+  const masterWallet = ethers.HDNodeWallet.fromMnemonic(
+    ethers.Mnemonic.fromPhrase(mnemonic), `m/44'/60'/0'/0/0`
+  ).connect(provider);
+
+  const usdtContract = new ethers.Contract(USDT_BSC_CONTRACT, ERC20_ABI, masterWallet);
+  const amountWei = ethers.parseUnits(String(amount), 18);
+
+  const masterUsdtBalance = await usdtContract.balanceOf(masterWallet.address);
+  if (masterUsdtBalance < amountWei) {
+    throw new Error(`Master wallet has insufficient USDT (available: ${ethers.formatUnits(masterUsdtBalance, 18)}, needed: ${amount}).`);
   }
 
-  const db = admin.firestore();
-
-  const adminDoc = await db.collection("users").doc(adminUid).get();
-  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
-    throw new HttpsError("permission-denied", "Only administrators may approve or reject withdrawals.");
+  const bnbBalance = await provider.getBalance(masterWallet.address);
+  const minGasReserve = ethers.parseEther("0.001");
+  if (bnbBalance < minGasReserve) {
+    throw new Error("Master wallet has insufficient BNB to cover the network gas fee.");
   }
 
-  const withdrawalRef = db.collection("withdrawals").doc(withdrawalId);
-  const cleanReason = (reason || "").trim();
+  const tx = await usdtContract.transfer(toAddress, amountWei);
+  const receipt = await tx.wait();
+  return receipt.hash;
+}
 
-  try {
+async function sendTRC20Payout(mnemonic, toAddress, amount) {
+  const seed = await bip39.mnemonicToSeed(mnemonic);
+  const hdwallet = HDKey.fromMasterSeed ? HDKey.fromMasterSeed(seed) : HDKey.default.fromMasterSeed(seed);
+  const masterNode = hdwallet.derive(`m/44'/195'/0'/0/0`);
+  const masterPrivateKeyHex = masterNode.privateKey.toString("hex");
+
+  const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: masterPrivateKeyHex });
+  const masterAddress = tronWeb.address.fromPrivateKey(masterPrivateKeyHex);
+
+  const contract = await tronWeb.contract().at(USDT_TRC20_CONTRACT);
+  const masterBalanceRaw = await contract.balanceOf(masterAddress).call();
+  const masterBalance = Number(masterBalanceRaw) / 1000000;
+
+  if (masterBalance < amount) {
+    throw new Error(`Master wallet has insufficient USDT (available: ${masterBalance}, needed: ${amount}).`);
+  }
+
+  const trxBalance = await tronWeb.trx.getBalance(masterAddress);
+  const minTrxReserve = 15_000_000;
+  if (trxBalance < minTrxReserve) {
+    throw new Error("Master wallet has insufficient TRX to cover the network fee.");
+  }
+
+  const amountInSun = Math.round(amount * 1000000);
+  const txHash = await contract.transfer(toAddress, amountInSun).send({ from: masterAddress });
+  return txHash;
+}
+
+exports.updateWithdrawalStatus = onCall(
+  { secrets: ["TRON_MNEMONIC"], timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+    const adminUid = request.auth.uid;
+    const { withdrawalId, newStatus, reason } = request.data || {};
+
+    if (!withdrawalId || !["completed", "rejected"].includes(newStatus)) {
+      throw new HttpsError("invalid-argument", "A valid withdrawalId and newStatus ('completed' or 'rejected') are required.");
+    }
+
+    const db = admin.firestore();
+
+    const adminDoc = await db.collection("users").doc(adminUid).get();
+    if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+      throw new HttpsError("permission-denied", "Only administrators may approve or reject withdrawals.");
+    }
+
+    const withdrawalRef = db.collection("withdrawals").doc(withdrawalId);
+    const cleanReason = (reason || "").trim();
+
+    // Step 1: atomically "claim" this withdrawal by flipping pending -> processing.
+    // This is the guard against double-processing (e.g. a double-tap on Approve):
+    // only ONE concurrent call can win this atomic check-and-set.
+    let withdrawalData;
     await db.runTransaction(async (transaction) => {
       const withdrawalDoc = await transaction.get(withdrawalRef);
       if (!withdrawalDoc.exists) throw new HttpsError("not-found", "Withdrawal request not found.");
 
-      const withdrawalData = withdrawalDoc.data();
+      withdrawalData = withdrawalDoc.data();
       if (withdrawalData.status !== "pending") {
         throw new HttpsError("failed-precondition", "This withdrawal request has already been processed.");
       }
 
-      const targetUserId = withdrawalData.userId;
-      const userRef = db.collection("users").doc(targetUserId);
-      const linkedTxQuery = db.collection("transactions").where("withdrawalId", "==", withdrawalId).limit(1);
-
-      const [userDoc, linkedTxSnap] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(linkedTxQuery),
-      ]);
-      const linkedTxRef = !linkedTxSnap.empty ? linkedTxSnap.docs[0].ref : null;
-
-      const withdrawalUpdate = {
-        status: newStatus,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      transaction.update(withdrawalRef, {
+        status: "processing",
         processedBy: adminUid,
-      };
-      if (newStatus === "rejected" && cleanReason) {
-        withdrawalUpdate.rejectionReason = cleanReason;
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    // Step 2 (rejected path): no on-chain action — refund and finalize.
+    if (newStatus === "rejected") {
+      try {
+        await db.runTransaction(async (transaction) => {
+          const targetUserId = withdrawalData.userId;
+          const userRef = db.collection("users").doc(targetUserId);
+          const linkedTxQuery = db.collection("transactions").where("withdrawalId", "==", withdrawalId).limit(1);
+
+          const [userDoc, linkedTxSnap] = await Promise.all([
+            transaction.get(userRef),
+            transaction.get(linkedTxQuery),
+          ]);
+          const linkedTxRef = !linkedTxSnap.empty ? linkedTxSnap.docs[0].ref : null;
+
+          transaction.update(withdrawalRef, {
+            status: "rejected",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            ...(cleanReason ? { rejectionReason: cleanReason } : {}),
+          });
+
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            const refundAmount = Number(withdrawalData.amount || 0);
+            const currentBalance = Number(userData.balance || userData.totalBalance || 0);
+            const refundedBalance = Number((currentBalance + refundAmount).toFixed(2));
+
+            transaction.update(userRef, {
+              balance: refundedBalance,
+              totalBalance: refundedBalance,
+            });
+          }
+
+          const rejectTitle = cleanReason
+            ? `Withdrawal Rejected - Refunded (${cleanReason})`
+            : "Withdrawal Rejected - Refunded";
+
+          if (linkedTxRef) {
+            transaction.update(linkedTxRef, {
+              status: "approved",
+              title: rejectTitle,
+              type: "WITHDRAWAL_REJECTED_REFUND",
+              isCredit: true,
+            });
+          } else {
+            const refundTxRef = db.collection("transactions").doc();
+            transaction.set(refundTxRef, {
+              transactionId: refundTxRef.id,
+              userId: withdrawalData.userId,
+              type: "WITHDRAWAL_REJECTED_REFUND",
+              amount: Number(withdrawalData.amount || 0),
+              status: "approved",
+              title: rejectTitle,
+              isCredit: true,
+              withdrawalId: withdrawalId,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        });
+
+        return { success: true, message: "Withdrawal rejected successfully." };
+      } catch (error) {
+        console.error("Error rejecting withdrawal:", error);
+        if (error instanceof HttpsError) throw error;
+        throw new HttpsError("internal", error.message || "Failed to reject withdrawal.");
       }
-      transaction.update(withdrawalRef, withdrawalUpdate);
+    }
 
-      if (newStatus === "rejected") {
-        if (userDoc.exists) {
-          const userData = userDoc.data();
-          const refundAmount = Number(withdrawalData.amount || 0);
-          const currentBalance = Number(userData.balance || userData.totalBalance || 0);
-          const refundedBalance = Number((currentBalance + refundAmount).toFixed(2));
+    // Step 2 (approved path): send the real on-chain payout from the master
+    // wallet BEFORE marking anything as completed.
+    const mnemonic = process.env.TRON_MNEMONIC;
+    let confirmedTxHash;
 
-          transaction.update(userRef, {
-            balance: refundedBalance,
-            totalBalance: refundedBalance,
-          });
-        }
+    try {
+      const network = withdrawalData.walletNetwork || "TRC20";
+      const payoutAmount = Number(withdrawalData.netPayout || withdrawalData.amount || 0);
 
-        const rejectTitle = cleanReason
-          ? `Withdrawal Rejected - Refunded (${cleanReason})`
-          : "Withdrawal Rejected - Refunded";
-
-        if (linkedTxRef) {
-          transaction.update(linkedTxRef, {
-            status: "approved",
-            title: rejectTitle,
-            type: "WITHDRAWAL_REJECTED_REFUND",
-            isCredit: true,
-          });
-        } else {
-          const refundTxRef = db.collection("transactions").doc();
-          transaction.set(refundTxRef, {
-            transactionId: refundTxRef.id,
-            userId: targetUserId,
-            type: "WITHDRAWAL_REJECTED_REFUND",
-            amount: Number(withdrawalData.amount || 0),
-            status: "approved",
-            title: rejectTitle,
-            isCredit: true,
-            withdrawalId: withdrawalId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
+      if (network === "BEP20") {
+        confirmedTxHash = await sendBEP20Payout(mnemonic, withdrawalData.walletAddress, payoutAmount);
       } else {
+        confirmedTxHash = await sendTRC20Payout(mnemonic, withdrawalData.walletAddress, payoutAmount);
+      }
+    } catch (payoutError) {
+      console.error(`Automatic payout failed for withdrawal ${withdrawalId}:`, payoutError.message);
+
+      // Revert the claim so the withdrawal goes back to pending and can be
+      // retried — the user's balance is untouched either way.
+      await withdrawalRef.update({
+        status: "pending",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      throw new HttpsError(
+        "internal",
+        `Automatic payout failed: ${payoutError.message}. The withdrawal has been returned to Pending — please resolve the issue (e.g. top up the master wallet) and try Approve again.`
+      );
+    }
+
+    // Step 3: payout succeeded on-chain — finalize the records.
+    try {
+      await db.runTransaction(async (transaction) => {
+        const linkedTxQuery = db.collection("transactions").where("withdrawalId", "==", withdrawalId).limit(1);
+        const linkedTxSnap = await transaction.get(linkedTxQuery);
+        const linkedTxRef = !linkedTxSnap.empty ? linkedTxSnap.docs[0].ref : null;
+
+        transaction.update(withdrawalRef, {
+          status: "completed",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          confirmedTxHash: confirmedTxHash,
+        });
+
         if (linkedTxRef) {
           transaction.update(linkedTxRef, {
             status: "approved",
@@ -526,7 +653,7 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
           const completedTxRef = db.collection("transactions").doc();
           transaction.set(completedTxRef, {
             transactionId: completedTxRef.id,
-            userId: targetUserId,
+            userId: withdrawalData.userId,
             type: "WITHDRAWAL",
             amount: Number(withdrawalData.amount || 0),
             status: "approved",
@@ -536,16 +663,19 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         }
-      }
-    });
+      });
 
-    return { success: true, message: `Withdrawal ${newStatus} successfully.` };
-  } catch (error) {
-    console.error("Error in updateWithdrawalStatus:", error);
-    if (error instanceof HttpsError) throw error;
-    throw new HttpsError("internal", error.message || "Failed to update withdrawal status.");
+      return { success: true, message: "Withdrawal completed and funds sent automatically.", txHash: confirmedTxHash };
+    } catch (error) {
+      // The on-chain transfer already happened at this point — if this
+      // Firestore write fails, funds are safely sent but records may be
+      // stale. Log loudly for manual reconciliation rather than losing
+      // track silently.
+      console.error(`CRITICAL: Payout for ${withdrawalId} succeeded on-chain (tx: ${confirmedTxHash}) but Firestore finalize failed:`, error);
+      throw new HttpsError("internal", `Payout sent (tx: ${confirmedTxHash}) but failed to update records. Please check manually.`);
+    }
   }
-});
+);
 
 // ============================================
 // DEPOSIT SYSTEM (server-side verified, unique address per request,
@@ -832,19 +962,6 @@ async function checkBEP20OnChainServer(address) {
     return null;
   }
 }
-
-// ---------- AUTO-SWEEP: consolidates confirmed deposits into the master
-// wallet (derivation index 0 — the SAME address already shown by default
-// in Trust Wallet). The master wallet must be pre-funded with a small
-// reserve of native BNB / TRX to cover gas fees for these sweeps.
-
-const BSC_RPC = "https://bsc-dataseed.binance.org/";
-const USDT_BSC_CONTRACT = "0x55d398326f99059ff775485246999027b3197955";
-const ERC20_ABI = [
-  "function transfer(address to, uint amount) returns (bool)",
-  "function balanceOf(address owner) view returns (uint256)",
-  "event Transfer(address indexed from, address indexed to, uint256 value)",
-];
 
 async function sweepBEP20Deposit(mnemonic, derivationIndex) {
   const provider = new ethers.JsonRpcProvider(BSC_RPC);
