@@ -20,8 +20,6 @@ service cloud.firestore {
 
       allow read: if request.auth != null && request.auth.uid == userId;
 
-      // Registration: user may create their own doc once, but cannot
-      // set balance/taskCount/earnings/wallet fields themselves at signup.
       allow create: if request.auth != null
                     && request.auth.uid == userId
                     && !('balance' in request.resource.data)
@@ -31,10 +29,6 @@ service cloud.firestore {
                     && !('tronAddress' in request.resource.data)
                     && !('walletAddress' in request.resource.data);
 
-      // Profile-only updates: contact/display info. walletAddress is
-      // deliberately NOT in this list — it can only be changed via the
-      // updateWalletAddress Cloud Function, which also enforces the
-      // "no duplicate wallet across accounts" rule server-side.
       allow update: if request.auth != null
                     && request.auth.uid == userId
                     && request.resource.data.diff(resource.data).affectedKeys()
@@ -43,7 +37,6 @@ service cloud.firestore {
                            'fullName', 'gender', 'dobText'
                          ]);
 
-      // No client-side delete of user docs.
       allow delete: if false;
     }
 
@@ -64,6 +57,19 @@ service cloud.firestore {
     // Read-only for the owning user; written only by Cloud Functions.
     // ---------------------------------------------------------------
     match /transactions/{txId} {
+      allow read: if request.auth != null
+                  && resource.data.userId == request.auth.uid;
+      allow write: if false; // server-only
+    }
+
+    // ---------------------------------------------------------------
+    // depositAddresses/{id}  (live pending-deposit status watched by
+    // DepositScreen.js so it can show a "Deposit Confirmed" popup).
+    // The scheduled Cloud Function verifies and credits deposits via
+    // the Admin SDK regardless of this rule — this only controls
+    // whether the CLIENT can watch its own deposit's live status.
+    // ---------------------------------------------------------------
+    match /depositAddresses/{depositId} {
       allow read: if request.auth != null
                   && resource.data.userId == request.auth.uid;
       allow write: if false; // server-only
