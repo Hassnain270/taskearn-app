@@ -9,157 +9,132 @@ import {
   FlatList,
   ActivityIndicator
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { ThemeContext } from '../../ThemeContext';
 
+const TYPE_LABELS = {
+  DEPOSIT: 'Deposit',
+  WITHDRAWAL: 'Withdrawal',
+  WELCOME_BONUS: 'Welcome Bonus (7%)',
+  DIRECT_REFERRAL_BONUS: 'Direct Bonus (10%)',
+  INDIRECT_REFERRAL_BONUS: 'Indirect Bonus (5%)',
+  VIP_UPGRADE_BONUS: 'VIP Upgrade Bonus (5%)',
+  WITHDRAWAL_REJECTED_REFUND: 'Withdrawal Rejected - Refunded',
+  TASK_PROFIT: 'Task Commission',
+};
+
+const TYPE_ICONS = {
+  DEPOSIT: 'arrow-down-circle',
+  WITHDRAWAL: 'arrow-up-circle',
+  WELCOME_BONUS: 'gift',
+  DIRECT_REFERRAL_BONUS: 'account-plus',
+  INDIRECT_REFERRAL_BONUS: 'account-multiple-plus',
+  VIP_UPGRADE_BONUS: 'crown',
+  WITHDRAWAL_REJECTED_REFUND: 'cash-refund',
+  TASK_PROFIT: 'clipboard-check',
+};
+
+const TYPE_COLORS = {
+  DEPOSIT: '#22C55E',
+  WITHDRAWAL: '#EF4444',
+  WELCOME_BONUS: '#F59E0B',
+  DIRECT_REFERRAL_BONUS: '#3B82F6',
+  INDIRECT_REFERRAL_BONUS: '#3B82F6',
+  VIP_UPGRADE_BONUS: '#8B5CF6',
+  WITHDRAWAL_REJECTED_REFUND: '#22C55E',
+  TASK_PROFIT: '#22C55E',
+};
+
 export default function HistoryScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
-  const [activeTab, setActiveTab] = useState('All');
+  const insets = useSafeAreaInsets();
+
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const currentStyles = isDarkMode ? darkStyles : lightStyles;
-
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
       setLoading(false);
       return;
     }
 
     const q = query(
       collection(db, 'transactions'),
-      where('userId', '==', user.uid),
+      where('userId', '==', currentUser.uid),
       orderBy('createdAt', 'desc')
     );
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const txList = snapshot.docs.map((doc) => {
-          const data = doc.data();
-
-          let displayType = data.title || data.type || 'Transaction';
-          if (data.type === 'DEPOSIT') displayType = 'Deposit';
-          else if (data.type === 'WITHDRAWAL') displayType = 'Withdrawal';
-          else if (data.type === 'WELCOME_BONUS') displayType = 'Welcome Bonus (7%)';
-          else if (data.type === 'DIRECT_REFERRAL_BONUS') displayType = 'Direct Bonus (10%)';
-          else if (data.type === 'INDIRECT_REFERRAL_BONUS') displayType = 'Indirect Bonus (5%)';
-          else if (data.type === 'VIP_UPGRADE_BONUS') displayType = 'VIP Upgrade Bonus (5%)';
-          else if (data.type === 'TASK_PROFIT') displayType = 'Task Commission';
-
-          const isDebit = data.type === 'WITHDRAWAL' || data.isCredit === false;
-          const isCredit = !isDebit;
-
-          const rawStatus = (data.status || 'APPROVED').toUpperCase();
-          let formattedStatus = 'APPROVED';
-          if (rawStatus === 'PENDING') formattedStatus = 'PENDING';
-          else if (rawStatus === 'REJECTED' || rawStatus === 'FAILED') formattedStatus = 'REJECTED';
-
-          return {
-            id: doc.id,
-            type: displayType,
-            rawType: data.type,
-            amount: Number(data.amount) || 0,
-            isCredit: isCredit,
-            date: formatDate(data.createdAt),
-            hasStatus: ['DEPOSIT', 'WITHDRAWAL'].includes(data.type),
-            status: formattedStatus,
-            txId: data.transactionId || data.txId || doc.id.substring(0, 10).toUpperCase()
-          };
-        });
-        setTransactions(txList);
-        setLoading(false);
-      },
-      (error) => {
-        console.log('Error fetching transaction history:', error);
-        setLoading(false);
-      }
-    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setTransactions(list);
+      setLoading(false);
+    }, (error) => {
+      console.log('Error fetching transaction history:', error);
+      setLoading(false);
+    });
 
     return () => unsubscribe();
   }, []);
 
-  const formatDate = (timestamp) => {
-    if (!timestamp) return 'Just now';
-    const dateObj = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return dateObj.toLocaleDateString('en-US', {
+  const currentStyles = isDarkMode ? darkStyles : lightStyles;
+
+  const formatDate = (createdAt) => {
+    if (!createdAt) return '';
+    const date = typeof createdAt.toDate === 'function' ? createdAt.toDate() : new Date(createdAt);
+    return date.toLocaleString([], {
       month: 'short',
       day: 'numeric',
+      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
     });
   };
 
-  const filteredData = transactions.filter((item) => {
-    if (activeTab === 'Credits') return item.isCredit;
-    if (activeTab === 'Debits') return !item.isCredit;
-    return true;
-  });
+  const renderItem = ({ item }) => {
+    const displayType = item.title || TYPE_LABELS[item.type] || item.type || 'Transaction';
+    const iconName = TYPE_ICONS[item.type] || 'swap-horizontal';
+    const accentColor = TYPE_COLORS[item.type] || '#94A3B8';
 
-  const getStatusStyle = (status) => {
-    if (status === 'APPROVED') return styles.statusApproved;
-    if (status === 'PENDING') return styles.statusPending;
-    return styles.statusRejected;
-  };
+    const isCredit = item.isCredit !== undefined ? item.isCredit : (item.type !== 'WITHDRAWAL');
+    const isPending = item.status === 'pending';
 
-  const getStatusTextColor = (status) => {
-    if (status === 'APPROVED') return '#22C55E';
-    if (status === 'PENDING') return '#F59E0B';
-    return '#EF4444';
-  };
+    return (
+      <View style={currentStyles.itemCard}>
+        <View style={[styles.iconBox, { backgroundColor: accentColor + '1A' }]}>
+          <MaterialCommunityIcons name={iconName} size={20} color={accentColor} />
+        </View>
 
-  const getTypeIcon = (type) => {
-    switch (type) {
-      case 'DEPOSIT':
-        return 'wallet-plus-outline';
-      case 'WITHDRAWAL':
-        return 'wallet-minus-outline';
-      case 'WELCOME_BONUS':
-        return 'gift-outline';
-      case 'DIRECT_REFERRAL_BONUS':
-        return 'account-plus-outline';
-      case 'INDIRECT_REFERRAL_BONUS':
-        return 'account-group-outline';
-      case 'VIP_UPGRADE_BONUS':
-        return 'star-circle-outline';
-      case 'TASK_PROFIT':
-        return 'checkbox-marked-circle-outline';
-      default:
-        return 'swap-horizontal';
-    }
-  };
+        <View style={styles.middleColumn}>
+          <Text style={currentStyles.itemTitle} numberOfLines={1}>{displayType}</Text>
+          <Text style={styles.itemDate}>{formatDate(item.createdAt)}</Text>
+        </View>
 
-  const renderHistoryItem = ({ item }) => (
-    <View style={currentStyles.historyCard}>
-      <View style={styles.iconContainer}>
-        <MaterialCommunityIcons
-          name={getTypeIcon(item.rawType)}
-          size={24}
-          color={item.isCredit ? '#22C55E' : '#EF4444'}
-        />
-      </View>
-      <View style={styles.cardLeft}>
-        <Text style={currentStyles.typeText}>{item.type}</Text>
-        <Text style={styles.txIdText}>TxID: {item.txId}</Text>
-        <Text style={styles.dateText}>{item.date}</Text>
-      </View>
-      <View style={styles.cardRight}>
-        <Text style={[styles.amountText, { color: item.isCredit ? '#22C55E' : '#EF4444' }]}>
-          {item.isCredit ? '+' : '-'}${item.amount.toFixed(2)}
-        </Text>
-        {item.hasStatus && (
-          <View style={[styles.statusBadge, getStatusStyle(item.status)]}>
-            <Text style={[styles.statusText, { color: getStatusTextColor(item.status) }]}>
-              {item.status}
+        <View style={styles.rightColumn}>
+          <Text style={[styles.itemAmount, { color: isCredit ? '#22C55E' : '#EF4444' }]}>
+            {isCredit ? '+' : '-'}${Number(item.amount || 0).toFixed(2)}
+          </Text>
+          <View style={[
+            styles.statusBadge,
+            isPending ? styles.pendingBadge : styles.approvedBadge
+          ]}>
+            <Text style={[
+              styles.statusText,
+              isPending ? styles.pendingText : styles.approvedText
+            ]}>
+              {isPending ? 'PENDING' : 'APPROVED'}
             </Text>
           </View>
-        )}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={currentStyles.container}>
@@ -169,45 +144,28 @@ export default function HistoryScreen({ navigation }) {
       />
 
       <View style={currentStyles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <MaterialCommunityIcons name="chevron-left" size={30} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
+        <TouchableOpacity style={styles.backBtn} onPress={() => { if (navigation) navigation.goBack(); }}>
+          <Feather name="arrow-left" size={22} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
         </TouchableOpacity>
         <Text style={currentStyles.headerTitle}>Transaction History</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <View style={currentStyles.tabBar}>
-        {['All', 'Credits', 'Debits'].map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tabItem, activeTab === tab && currentStyles.activeTabItem]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab ? styles.activeTabText : styles.inactiveTabText]}>
-              {tab}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <View style={{ width: 22 }} />
       </View>
 
       {loading ? (
-        <View style={styles.centerContainer}>
+        <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color="#3B82F6" />
         </View>
       ) : (
         <FlatList
-          data={filteredData}
-          renderItem={renderHistoryItem}
+          data={transactions}
           keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          contentContainerStyle={[styles.listContainer, { paddingBottom: 24 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={filteredData.length === 0 ? styles.emptyContainer : styles.listContainer}
-          ItemSeparatorComponent={() => <View style={currentStyles.divider} />}
           ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <MaterialCommunityIcons name="history" size={48} color={isDarkMode ? '#484F58' : '#94A3B8'} />
-              <Text style={[styles.emptyText, { color: isDarkMode ? '#94A3B8' : '#64748B' }]}>
-                No transactions found
-              </Text>
+            <View style={currentStyles.emptyCard}>
+              <MaterialCommunityIcons name="history" size={32} color={isDarkMode ? '#334155' : '#CBD5E1'} />
+              <Text style={styles.emptyText}>No transactions recorded yet.</Text>
             </View>
           }
         />
@@ -218,46 +176,36 @@ export default function HistoryScreen({ navigation }) {
 
 const lightStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1E293B' },
-  tabBar: { flexDirection: 'row', backgroundColor: '#FFFFFF', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', justifyContent: 'space-around' },
-  activeTabItem: { borderBottomColor: '#3B82F6' },
-  historyCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 16, backgroundColor: '#FFFFFF' },
-  typeText: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
-  divider: { height: 1, backgroundColor: '#F1F5F9' }
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1E293B' },
+  itemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#F1F5F9' },
+  itemTitle: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
+  emptyCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 30, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F1F5F9', marginTop: 20, gap: 8 }
 });
 
 const darkStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E14' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#21262D' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
-  tabBar: { flexDirection: 'row', backgroundColor: '#161B22', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#21262D', justifyContent: 'space-around' },
-  activeTabItem: { borderBottomColor: '#3B82F6' },
-  historyCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 16, backgroundColor: '#161B22' },
-  typeText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
-  divider: { height: 1, backgroundColor: '#21262D' }
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
+  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
+  itemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#161B22', borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#21262D' },
+  itemTitle: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
+  emptyCard: { backgroundColor: '#161B22', borderRadius: 14, padding: 30, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#21262D', marginTop: 20, gap: 8 }
 });
 
 const styles = StyleSheet.create({
-  backBtn: { padding: 5 },
-  tabItem: { paddingVertical: 8, paddingHorizontal: 24, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabText: { fontSize: 13, fontWeight: '700' },
-  activeTabText: { color: '#3B82F6' },
-  inactiveTabText: { color: '#94A3B8' },
-  listContainer: { paddingBottom: 20 },
-  emptyContainer: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyState: { alignItems: 'center', justifyContent: 'center', padding: 20 },
-  emptyText: { marginTop: 10, fontSize: 14, fontWeight: '600' },
-  iconContainer: { paddingRight: 12, justifyContent: 'center', alignItems: 'center' },
-  cardLeft: { flex: 1, paddingRight: 10 },
-  txIdText: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 4 },
-  dateText: { fontSize: 11, color: '#94A3B8', fontWeight: '500', marginTop: 2 },
-  cardRight: { alignItems: 'flex-end', justifyContent: 'center' },
-  amountText: { fontSize: 16, fontWeight: 'bold' },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginTop: 6, alignItems: 'center', justifyContent: 'center' },
-  statusApproved: { backgroundColor: 'rgba(34, 197, 94, 0.12)' },
-  statusPending: { backgroundColor: 'rgba(245, 158, 11, 0.12)' },
-  statusRejected: { backgroundColor: 'rgba(239, 68, 68, 0.12)' },
-  statusText: { fontSize: 9, fontWeight: 'bold', letterSpacing: 0.3 }
+  backBtn: { padding: 2 },
+  loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  listContainer: { padding: 16 },
+  iconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  middleColumn: { flex: 1, paddingRight: 8 },
+  itemDate: { fontSize: 11, fontWeight: '600', color: '#94A3B8', marginTop: 3 },
+  rightColumn: { alignItems: 'flex-end', gap: 5 },
+  itemAmount: { fontSize: 14, fontWeight: 'bold' },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  pendingBadge: { backgroundColor: '#FEF3C7' },
+  approvedBadge: { backgroundColor: '#D1FAE5' },
+  statusText: { fontSize: 9, fontWeight: '800' },
+  pendingText: { color: '#D97706' },
+  approvedText: { color: '#059669' },
+  emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500' }
 });

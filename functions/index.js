@@ -404,6 +404,22 @@ exports.requestWithdrawal = onCall(async (request) => {
         status: "pending",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      // A "pending" entry is also written to transactions right away, so the
+      // request shows up immediately in the user's History screen instead
+      // of only appearing once an admin later approves or rejects it.
+      const withdrawalTxRef = db.collection("transactions").doc();
+      transaction.set(withdrawalTxRef, {
+        transactionId: withdrawalTxRef.id,
+        userId: userId,
+        type: "WITHDRAWAL",
+        amount: Number(amount),
+        status: "pending",
+        title: "Withdrawal Requested (Pending)",
+        isCredit: false,
+        withdrawalId: newWithdrawalRef.id,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     });
 
     return { success: true, message: "Withdrawal request submitted successfully." };
@@ -445,6 +461,14 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
 
       const targetUserId = withdrawalData.userId;
       const userRef = db.collection("users").doc(targetUserId);
+      const linkedTxQuery = db.collection("transactions").where("withdrawalId", "==", withdrawalId).limit(1);
+
+      // All reads must happen before any writes in a Firestore transaction.
+      const [userDoc, linkedTxSnap] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(linkedTxQuery),
+      ]);
+      const linkedTxRef = !linkedTxSnap.empty ? linkedTxSnap.docs[0].ref : null;
 
       transaction.update(withdrawalRef, {
         status: newStatus,
@@ -453,7 +477,6 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
       });
 
       if (newStatus === "rejected") {
-        const userDoc = await transaction.get(userRef);
         if (userDoc.exists) {
           const userData = userDoc.data();
           const refundAmount = Number(withdrawalData.amount || 0);
@@ -464,31 +487,51 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
             balance: refundedBalance,
             totalBalance: refundedBalance,
           });
+        }
 
+        // Update the existing pending transaction record to reflect the
+        // rejection + refund, rather than creating a duplicate entry.
+        if (linkedTxRef) {
+          transaction.update(linkedTxRef, {
+            status: "approved",
+            title: "Withdrawal Rejected - Refunded",
+            type: "WITHDRAWAL_REJECTED_REFUND",
+            isCredit: true,
+          });
+        } else {
           const refundTxRef = db.collection("transactions").doc();
           transaction.set(refundTxRef, {
             transactionId: refundTxRef.id,
             userId: targetUserId,
             type: "WITHDRAWAL_REJECTED_REFUND",
-            amount: refundAmount,
+            amount: Number(withdrawalData.amount || 0),
             status: "approved",
             title: "Withdrawal Rejected - Refunded",
             isCredit: true,
+            withdrawalId: withdrawalId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         }
       } else {
-        const completedTxRef = db.collection("transactions").doc();
-        transaction.set(completedTxRef, {
-          transactionId: completedTxRef.id,
-          userId: targetUserId,
-          type: "WITHDRAWAL",
-          amount: Number(withdrawalData.amount || 0),
-          status: "approved",
-          title: "Withdrawal Completed",
-          isCredit: false,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        if (linkedTxRef) {
+          transaction.update(linkedTxRef, {
+            status: "approved",
+            title: "Withdrawal Completed",
+          });
+        } else {
+          const completedTxRef = db.collection("transactions").doc();
+          transaction.set(completedTxRef, {
+            transactionId: completedTxRef.id,
+            userId: targetUserId,
+            type: "WITHDRAWAL",
+            amount: Number(withdrawalData.amount || 0),
+            status: "approved",
+            title: "Withdrawal Completed",
+            isCredit: false,
+            withdrawalId: withdrawalId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
       }
     });
 
@@ -751,10 +794,6 @@ async function checkTRC20OnChainServer(address, expectedAmount) {
   }
 }
 
-// BEP20 verification now checks the USDT balance directly on-chain via a
-// free public BSC RPC node — no API key, no rate limits, no paid plan
-// required. Since every deposit address is generated fresh and used only
-// once, any positive USDT balance found on it IS that user's deposit.
 async function checkBEP20OnChainServer(address) {
   try {
     const provider = new ethers.JsonRpcProvider(BSC_RPC);
@@ -769,8 +808,6 @@ async function checkBEP20OnChainServer(address) {
       return null;
     }
 
-    // Best-effort lookup of the actual transfer hash for record-keeping.
-    // Not required for crediting — the balance check above is authoritative.
     let txId = "";
     try {
       const currentBlock = await provider.getBlockNumber();
