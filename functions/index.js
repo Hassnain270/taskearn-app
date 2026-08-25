@@ -507,7 +507,7 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
 
 async function createPendingDepositRecord(db, userId, network, address, expectedAmount, derivationIndex) {
   const depositRef = db.collection("depositAddresses").doc();
-  const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
+  const expiresAt = Date.now() + 3 * 60 * 60 * 1000; // 3 hours
   await depositRef.set({
     depositId: depositRef.id,
     userId,
@@ -739,7 +739,13 @@ async function checkTRC20OnChainServer(address, expectedAmount) {
     for (const tx of data.data) {
       if (tx.token_info?.address === usdtContract && tx.to === address) {
         const receivedAmount = parseFloat(tx.value) / 1000000;
-        if (receivedAmount >= expectedAmount) {
+        // Accept any real, meaningful deposit amount, not an exact match to
+        // what the user typed — sender-side platforms (exchanges, other
+        // wallets) often deduct their own network fee before the funds
+        // arrive, so the on-chain amount is frequently a little less than
+        // what the user entered. The exact received amount is what gets
+        // credited either way, so this never over- or under-credits.
+        if (receivedAmount >= 0.5) {
           return { amount: receivedAmount, txId: tx.transaction_id };
         }
       }
@@ -770,12 +776,14 @@ async function checkBEP20OnChainServer(address, expectedAmount, apiKey) {
       if (tx.to.toLowerCase() === address.toLowerCase()) {
         const receivedAmount = parseFloat(tx.value) / Math.pow(10, 18);
         console.log(`[BEP20 CHECK] Match found! received=${receivedAmount} expected=${expectedAmount}`);
-        if (receivedAmount >= expectedAmount) {
+        // Same tolerance as TRC20 above — accept the real on-chain amount
+        // rather than requiring an exact match to the user-entered amount.
+        if (receivedAmount >= 0.5) {
           return { amount: receivedAmount, txId: tx.hash };
         }
       }
     }
-    console.log(`[BEP20 CHECK] No matching transaction met the expected amount for ${address}.`);
+    console.log(`[BEP20 CHECK] No matching transaction met the minimum amount for ${address}.`);
     return null;
   } catch (error) {
     console.error("BEP20 on-chain check error:", error.message, error);
