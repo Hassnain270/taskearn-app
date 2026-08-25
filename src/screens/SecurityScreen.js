@@ -1,5 +1,4 @@
-
-import React, { useState, useMemo, useEffect, useContext } from 'react';
+import React, { useState, useMemo, useEffect, useContext, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,14 +11,18 @@ import {
   TextInput,
   Alert,
   FlatList,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { auth, db } from '../firebaseConfig';
-import { updatePassword, updateEmail } from 'firebase/auth';
+import { updatePassword, updateEmail, signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
+
+const functionsInstance = getFunctions();
 
 const ALL_COUNTRIES = [
   { code: 'AF', name: 'Afghanistan', dial_code: '+93', minLen: 9, maxLen: 9 },
@@ -217,6 +220,17 @@ export default function SecurityScreen({ navigation }) {
   const [currentPhone, setCurrentPhone] = useState('Not Set');
   const [currentEmail, setCurrentEmail] = useState('Not Set');
 
+  // Email changes require verifying the NEW address actually belongs to
+  // the user before it's finalized — otherwise someone could lock the
+  // real owner out by "changing" the email to something they don't
+  // control. otpStep tracks whether we're waiting on that verification.
+  const [otpStep, setOtpStep] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpTimer, setOtpTimer] = useState(60);
+  const [canResendOtp, setCanResendOtp] = useState(false);
+  const otpIntervalRef = useRef(null);
+
   useEffect(() => {
     const loadUserData = async () => {
       try {
@@ -236,6 +250,30 @@ export default function SecurityScreen({ navigation }) {
     loadUserData();
   }, []);
 
+  useEffect(() => {
+    return () => stopOtpTimer();
+  }, []);
+
+  const startOtpTimer = () => {
+    stopOtpTimer();
+    setOtpTimer(60);
+    setCanResendOtp(false);
+    otpIntervalRef.current = setInterval(() => {
+      setOtpTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(otpIntervalRef.current);
+          setCanResendOtp(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const stopOtpTimer = () => {
+    if (otpIntervalRef.current) clearInterval(otpIntervalRef.current);
+  };
+
   const filteredCountries = useMemo(() => {
     if (!searchQuery.trim()) return ALL_COUNTRIES;
     return ALL_COUNTRIES.filter(item =>
@@ -250,7 +288,17 @@ export default function SecurityScreen({ navigation }) {
     setSecurePasswordEntry(true);
     setNewPhone('');
     setNewEmail('');
+    setOtpStep(false);
+    setOtpCode('');
+    stopOtpTimer();
     setModalVisible(true);
+  };
+
+  const closeModal = () => {
+    setModalVisible(false);
+    setOtpStep(false);
+    setOtpCode('');
+    stopOtpTimer();
   };
 
   const handlePasswordChange = (val) => {
@@ -307,7 +355,11 @@ export default function SecurityScreen({ navigation }) {
     return true;
   };
 
+  // Passkey/biometric hardware doesn't exist in a browser — bypass on web,
+  // matching the behavior already used on Login and Withdraw screens.
   const verifyDevicePasskey = async () => {
+    if (Platform.OS === 'web') return true;
+
     try {
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
@@ -339,13 +391,52 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  const handleUpdate = async () => {
-    if (!validateInputs()) {
-      return;
+  // After a sensitive credential change, end the current session and send
+  // the user back to Login — this ensures no other logged-in session (on
+  // another device, or an attacker who briefly had access) stays valid,
+  // and confirms the new password/email actually works before relying on it.
+  const forceReLogin = (message) => {
+    const goToLogin = async () => {
+      try { await signOut(auth); } catch (e) {}
+      if (navigation?.reset) {
+        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      } else if (navigation?.replace) {
+        navigation.replace('Login');
+      } else if (navigation?.navigate) {
+        navigation.navigate('Login');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      window.alert(message);
+      goToLogin();
+    } else {
+      Alert.alert("Security Update Complete", message, [{ text: "OK", onPress: goToLogin }]);
     }
+  };
+
+  const handleUpdate = async () => {
+    if (!validateInputs()) return;
 
     const isPasskeyVerified = await verifyDevicePasskey();
-    if (!isPasskeyVerified) {
+    if (!isPasskeyVerified) return;
+
+    // Email changes need one more step: verify the NEW address via OTP
+    // before anything is actually changed.
+    if (activeLayer === 'email') {
+      const cleanEmail = newEmail.trim().toLowerCase();
+      setLoading(true);
+      try {
+        const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+        await sendOtp({ purpose: 'EMAIL_CHANGE', emailInput: cleanEmail });
+        setOtpStep(true);
+        setOtpCode('');
+        startOtpTimer();
+      } catch (err) {
+        Alert.alert("Error", err.message || "Failed to send verification code to the new email.");
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
@@ -360,21 +451,15 @@ export default function SecurityScreen({ navigation }) {
 
       if (activeLayer === 'password') {
         await updatePassword(user, newPassword);
-        Alert.alert("Success", "Password updated successfully!");
+        closeModal();
+        forceReLogin("Your password has been changed successfully. For your security, please log in again with your new password.");
       } else if (activeLayer === 'phone') {
         const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
         await updateDoc(doc(db, 'users', user.uid), { phone: fullPhone });
         setCurrentPhone(fullPhone);
         Alert.alert("Success", "Phone number updated successfully!");
-      } else if (activeLayer === 'email') {
-        const formattedEmail = newEmail.trim();
-        await updateEmail(user, formattedEmail);
-        await updateDoc(doc(db, 'users', user.uid), { email: formattedEmail });
-        setCurrentEmail(formattedEmail);
-        Alert.alert("Success", "Email address updated successfully!");
+        closeModal();
       }
-
-      setModalVisible(false);
     } catch (err) {
       if (err.code === 'auth/requires-recent-login') {
         Alert.alert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
@@ -384,6 +469,59 @@ export default function SecurityScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleResendEmailOtp = async () => {
+    if (!canResendOtp) return;
+    const cleanEmail = newEmail.trim().toLowerCase();
+    setLoading(true);
+    try {
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'EMAIL_CHANGE', emailInput: cleanEmail });
+      startOtpTimer();
+      Alert.alert("Code Resent", "A new verification code has been sent to your new email address.");
+    } catch (err) {
+      Alert.alert("Error", err.message || "Failed to resend the code.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmailOtp = async () => {
+    if (otpCode.length !== 6) {
+      Alert.alert("Invalid Code", "Please enter the 6-digit code sent to your new email.");
+      return;
+    }
+
+    setOtpVerifying(true);
+    try {
+      const cleanEmail = newEmail.trim().toLowerCase();
+      const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
+      await verifyOtp({ email: cleanEmail, code: otpCode, purpose: 'EMAIL_CHANGE' });
+
+      const user = auth.currentUser;
+      await updateEmail(user, cleanEmail);
+      await updateDoc(doc(db, 'users', user.uid), { email: cleanEmail });
+      setCurrentEmail(cleanEmail);
+
+      closeModal();
+      forceReLogin("Your email address has been changed and verified successfully. For your security, please log in again with your new email.");
+    } catch (err) {
+      if (err.code === 'auth/requires-recent-login') {
+        Alert.alert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
+      } else {
+        Alert.alert("Verification Failed", err.message || "The code entered is invalid or has expired.");
+      }
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const handleOtpCancel = () => {
+    setOtpStep(false);
+    setOtpCode('');
+    stopOtpTimer();
+    closeModal();
   };
 
   return (
@@ -448,7 +586,7 @@ export default function SecurityScreen({ navigation }) {
         animationType="slide"
         transparent={true}
         visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={closeModal}
       >
         <View style={styles.modalOverlay}>
           <View style={isDarkMode ? darkStyles.modalContent : lightStyles.modalContent}>
@@ -457,9 +595,10 @@ export default function SecurityScreen({ navigation }) {
               <Text style={isDarkMode ? darkStyles.modalTitle : lightStyles.modalTitle}>
                 {activeLayer === 'password' && "Change Login Password"}
                 {activeLayer === 'phone' && "Change Phone Number"}
-                {activeLayer === 'email' && "Change Email Address"}
+                {activeLayer === 'email' && !otpStep && "Change Email Address"}
+                {activeLayer === 'email' && otpStep && "Verify New Email"}
               </Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
+              <TouchableOpacity onPress={closeModal}>
                 <Feather name="x" size={20} color={isDarkMode ? "#94A3B8" : "#64748B"} />
               </TouchableOpacity>
             </View>
@@ -519,7 +658,7 @@ export default function SecurityScreen({ navigation }) {
               </View>
             )}
 
-            {activeLayer === 'email' && (
+            {activeLayer === 'email' && !otpStep && (
               <View style={styles.formContainer}>
                 <Text style={styles.currentActiveLabel}>Current Email: {currentEmail}</Text>
                 <View style={styles.inputWrapper}>
@@ -528,6 +667,7 @@ export default function SecurityScreen({ navigation }) {
                     placeholder="Enter New Email Address"
                     placeholderTextColor="#64748B"
                     keyboardType="email-address"
+                    autoCapitalize="none"
                     value={newEmail}
                     onChangeText={setNewEmail}
                   />
@@ -535,18 +675,63 @@ export default function SecurityScreen({ navigation }) {
               </View>
             )}
 
-            <Text style={styles.infoAlert}>
-              * Note: Device Passkey (Fingerprint / Face Unlock / Screen Lock) verification will be prompted to confirm this action.
-            </Text>
+            {activeLayer === 'email' && otpStep && (
+              <View style={styles.formContainer}>
+                <Text style={styles.currentActiveLabel}>
+                  We sent a 6-digit code to {newEmail.trim().toLowerCase()}
+                </Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={isDarkMode ? darkStyles.inputField : lightStyles.inputField}
+                    placeholder="Enter 6-digit code"
+                    placeholderTextColor="#64748B"
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    value={otpCode}
+                    onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
+                  />
+                </View>
+                <View style={styles.otpTimerRow}>
+                  {canResendOtp ? (
+                    <TouchableOpacity onPress={handleResendEmailOtp} disabled={loading}>
+                      <Text style={styles.resendActiveText}>Resend Code</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {!(activeLayer === 'email' && otpStep) && (
+              <Text style={styles.infoAlert}>
+                * Note: Device Passkey (Fingerprint / Face Unlock / Screen Lock) verification will be prompted to confirm this action.
+              </Text>
+            )}
 
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.submitBtn} onPress={handleUpdate} disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.submitBtnText}>Verify Passkey & Update</Text>
-                )}
-              </TouchableOpacity>
+              {activeLayer === 'email' && otpStep ? (
+                <>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.submitBtn} onPress={handleVerifyEmailOtp} disabled={otpVerifying}>
+                    {otpVerifying ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.submitBtnText}>Verify OTP</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity style={styles.submitBtn} onPress={handleUpdate} disabled={loading}>
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.submitBtnText}>Verify Passkey & Update</Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
 
           </View>
@@ -627,9 +812,14 @@ const styles = StyleSheet.create({
   phoneInputRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   countrySelectorText: { fontSize: 14, fontWeight: '600' },
   infoAlert: { fontSize: 11, color: '#3B82F6', fontWeight: '500', marginBottom: 20, lineHeight: 16 },
+  otpTimerRow: { alignItems: 'center', marginTop: 4, marginBottom: 16 },
+  resendActiveText: { color: '#3B82F6', fontSize: 13, fontWeight: '700' },
+  resendDisabledText: { color: '#94A3B8', fontSize: 13, fontWeight: '500' },
   modalActions: { flexDirection: 'row', gap: 12 },
   submitBtn: { flex: 1, backgroundColor: '#3B82F6', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   submitBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold' },
+  cancelBtn: { flex: 1, backgroundColor: 'rgba(148,163,184,0.15)', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  cancelBtnText: { color: '#94A3B8', fontSize: 15, fontWeight: 'bold' },
 
   countryModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   countryModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },

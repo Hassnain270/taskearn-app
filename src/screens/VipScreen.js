@@ -134,10 +134,15 @@ export default function VipScreen({ navigation, route }) {
               </View>
             );
           } else if (isPreviousVip) {
+            // Tiers the user has already passed through — cannot be
+            // re-unlocked (VIP progress only moves forward), so this is
+            // purely informational. No lock icon or red color (which
+            // implies action is needed) and it's a plain View, not
+            // pressable, so tapping does nothing.
             renderStatusButton = (
-              <View style={[styles.lockedLabelBox, { backgroundColor: isDarkMode ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.08)' }]}>
-                <MaterialCommunityIcons name="lock" size={14} color="#EF4444" />
-                <Text style={styles.lockedText}>LOCKED</Text>
+              <View style={[styles.completedLabelBox, { backgroundColor: isDarkMode ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.15)' }]}>
+                <MaterialCommunityIcons name="check" size={14} color="#94A3B8" />
+                <Text style={styles.completedText}>COMPLETED</Text>
               </View>
             );
           } else {
@@ -248,8 +253,8 @@ const styles = StyleSheet.create({
   cardRight: { alignItems: 'flex-end' },
   activeLabelBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(34, 197, 94, 0.15)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   activeText: { fontSize: 10, fontWeight: 'bold', color: '#22C55E', marginLeft: 4 },
-  lockedLabelBox: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
-  lockedText: { fontSize: 10, fontWeight: 'bold', color: '#EF4444', marginLeft: 4 },
+  completedLabelBox: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
+  completedText: { fontSize: 10, fontWeight: 'bold', color: '#94A3B8', marginLeft: 4 },
   unlockBtn: { backgroundColor: '#3B82F6', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   unlockBtnText: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' },
   disabledCard: { opacity: 0.5 },

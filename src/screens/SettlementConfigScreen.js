@@ -92,7 +92,12 @@ export default function SettlementConfigScreen({ navigation }) {
     }
   };
 
+  // Passkey / biometric hardware simply doesn't exist in a browser — on
+  // web, we allow the action to proceed the same way LoginScreen and
+  // WithdrawAssetsScreen already do, instead of permanently blocking it.
   const verifyDeviceSecurity = async () => {
+    if (Platform.OS === 'web') return true;
+
     try {
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
@@ -173,10 +178,6 @@ export default function SettlementConfigScreen({ navigation }) {
     }
 
     try {
-      // The uniqueness check (no two accounts sharing the same wallet) and
-      // the actual write both happen server-side, atomically — the client
-      // can no longer write walletAddress directly (blocked by Firestore
-      // security rules).
       const updateWallet = httpsCallable(functionsInstance, 'updateWalletAddress');
       await updateWallet({ walletAddress: trimmedAddress, network: network });
 
