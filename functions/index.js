@@ -739,12 +739,6 @@ async function checkTRC20OnChainServer(address, expectedAmount) {
     for (const tx of data.data) {
       if (tx.token_info?.address === usdtContract && tx.to === address) {
         const receivedAmount = parseFloat(tx.value) / 1000000;
-        // Accept any real, meaningful deposit amount, not an exact match to
-        // what the user typed — sender-side platforms (exchanges, other
-        // wallets) often deduct their own network fee before the funds
-        // arrive, so the on-chain amount is frequently a little less than
-        // what the user entered. The exact received amount is what gets
-        // credited either way, so this never over- or under-credits.
         if (receivedAmount >= 0.5) {
           return { amount: receivedAmount, txId: tx.transaction_id };
         }
@@ -757,34 +751,41 @@ async function checkTRC20OnChainServer(address, expectedAmount) {
   }
 }
 
-async function checkBEP20OnChainServer(address, expectedAmount, apiKey) {
+// BEP20 verification now checks the USDT balance directly on-chain via a
+// free public BSC RPC node — no API key, no rate limits, no paid plan
+// required. Since every deposit address is generated fresh and used only
+// once, any positive USDT balance found on it IS that user's deposit.
+async function checkBEP20OnChainServer(address) {
   try {
-    const usdtContractBSC = "0x55d398326f99059ff775485246999027b3197955";
-    const url = `https://api.etherscan.io/v2/api?chainid=56&module=account&action=tokentx&contractaddress=${usdtContractBSC}&address=${address}&page=1&offset=20&sort=desc&apikey=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
+    const provider = new ethers.JsonRpcProvider(BSC_RPC);
+    const contract = new ethers.Contract(USDT_BSC_CONTRACT, ERC20_ABI, provider);
 
-    console.log(`[BEP20 CHECK] address=${address} expected=${expectedAmount} status=${data.status} message=${data.message} resultCount=${Array.isArray(data.result) ? data.result.length : "N/A"}`);
+    const rawBalance = await contract.balanceOf(address);
+    const receivedAmount = Number(ethers.formatUnits(rawBalance, 18));
 
-    if (data.status !== "1" || !data.result || data.result.length === 0) {
-      console.log(`[BEP20 CHECK] No results or API error for ${address}. Full response: ${JSON.stringify(data).substring(0, 500)}`);
+    console.log(`[BEP20 CHECK] address=${address} onChainBalance=${receivedAmount}`);
+
+    if (receivedAmount < 0.5) {
       return null;
     }
 
-    for (const tx of data.result) {
-      console.log(`[BEP20 CHECK] tx to=${tx.to} value=${tx.value} hash=${tx.hash}`);
-      if (tx.to.toLowerCase() === address.toLowerCase()) {
-        const receivedAmount = parseFloat(tx.value) / Math.pow(10, 18);
-        console.log(`[BEP20 CHECK] Match found! received=${receivedAmount} expected=${expectedAmount}`);
-        // Same tolerance as TRC20 above — accept the real on-chain amount
-        // rather than requiring an exact match to the user-entered amount.
-        if (receivedAmount >= 0.5) {
-          return { amount: receivedAmount, txId: tx.hash };
-        }
+    // Best-effort lookup of the actual transfer hash for record-keeping.
+    // Not required for crediting — the balance check above is authoritative.
+    let txId = "";
+    try {
+      const currentBlock = await provider.getBlockNumber();
+      const fromBlock = Math.max(0, currentBlock - 5000);
+      const filter = contract.filters.Transfer(null, address);
+      const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+      if (events.length > 0) {
+        txId = events[events.length - 1].transactionHash;
       }
+    } catch (logError) {
+      console.log(`[BEP20 CHECK] Could not fetch transfer tx hash (non-fatal): ${logError.message}`);
     }
-    console.log(`[BEP20 CHECK] No matching transaction met the minimum amount for ${address}.`);
-    return null;
+
+    console.log(`[BEP20 CHECK] Deposit confirmed for ${address}: amount=${receivedAmount} txId=${txId}`);
+    return { amount: receivedAmount, txId };
   } catch (error) {
     console.error("BEP20 on-chain check error:", error.message, error);
     return null;
@@ -801,6 +802,7 @@ const USDT_BSC_CONTRACT = "0x55d398326f99059ff775485246999027b3197955";
 const ERC20_ABI = [
   "function transfer(address to, uint amount) returns (bool)",
   "function balanceOf(address owner) view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
 ];
 
 async function sweepBEP20Deposit(mnemonic, derivationIndex) {
@@ -878,13 +880,12 @@ async function sweepTRC20Deposit(mnemonic, derivationIndex) {
 }
 
 exports.checkPendingDeposits = onSchedule(
-  { schedule: "every 3 minutes", secrets: ["ETHERSCAN_API_KEY", "TRON_MNEMONIC"] },
+  { schedule: "every 3 minutes", secrets: ["TRON_MNEMONIC"] },
   async () => {
     const db = admin.firestore();
-    const apiKey = process.env.ETHERSCAN_API_KEY;
     const mnemonic = process.env.TRON_MNEMONIC;
 
-    console.log(`[SCHEDULER] Run started. apiKeyPresent=${!!apiKey} mnemonicPresent=${!!mnemonic}`);
+    console.log(`[SCHEDULER] Run started. mnemonicPresent=${!!mnemonic}`);
 
     const pendingSnap = await db.collection("depositAddresses").where("status", "==", "pending").get();
     console.log(`[SCHEDULER] Found ${pendingSnap.size} pending deposit(s) to check.`);
@@ -904,7 +905,7 @@ exports.checkPendingDeposits = onSchedule(
       if (data.network === "TRC20") {
         found = await checkTRC20OnChainServer(data.address, data.expectedAmount);
       } else if (data.network === "BEP20") {
-        found = await checkBEP20OnChainServer(data.address, data.expectedAmount, apiKey);
+        found = await checkBEP20OnChainServer(data.address);
       }
 
       console.log(`[SCHEDULER] Result for ${docSnap.id}: ${found ? JSON.stringify(found) : "not found yet"}`);
