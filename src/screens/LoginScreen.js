@@ -597,14 +597,16 @@ export default function LoginScreen({ navigation }) {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.passkeyLoginBtn}
-          onPress={handleLoginWithPasskey}
-          disabled={isLoading}
-        >
-          <MaterialCommunityIcons name="fingerprint" size={22} color="#3B82F6" />
-          <Text style={styles.passkeyLoginBtnText}>Login with Passkey</Text>
-        </TouchableOpacity>
+        {Platform.OS !== 'web' && (
+  <TouchableOpacity
+    style={styles.passkeyLoginBtn}
+    onPress={handleLoginWithPasskey}
+    disabled={isLoading}
+  >
+    <MaterialCommunityIcons name="fingerprint" size={22} color="#3B82F6" />
+    <Text style={styles.passkeyLoginBtnText}>Login with Passkey</Text>
+  </TouchableOpacity>
+)}
 
         <View style={styles.footerRow}>
           <Text style={styles.footerText}>Don't have an account? </Text>
