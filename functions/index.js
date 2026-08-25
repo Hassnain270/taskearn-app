@@ -137,16 +137,9 @@ function getPktResetBoundaries() {
 }
 
 // ============================================
-// CROSS-USER LOOKUPS (must run server-side: either the caller isn't
-// authenticated yet — login, forgot password — or needs to check OTHER
-// users' documents, which Firestore security rules correctly forbid the
-// client from reading directly).
+// CROSS-USER LOOKUPS
 // ============================================
 
-// Resolves a login identifier (email or username) to the account's email,
-// uid, and the small set of non-sensitive fields needed for the Passkey
-// login flow. Intentionally does NOT require request.auth, since this runs
-// BEFORE the user is signed in.
 exports.resolveLoginIdentifier = onCall(async (request) => {
   const identifier = (request.data?.identifier || "").trim();
   if (!identifier) throw new HttpsError("invalid-argument", "Identifier is required.");
@@ -184,9 +177,6 @@ exports.resolveLoginIdentifier = onCall(async (request) => {
   }
 });
 
-// Checks username/email/phone availability and referral code validity
-// during registration, all in one server-side call (runs pre-auth, before
-// the account even exists).
 exports.checkRegistrationAvailability = onCall(async (request) => {
   const { username, email, phone, referral } = request.data || {};
   const db = admin.firestore();
@@ -236,10 +226,6 @@ exports.checkRegistrationAvailability = onCall(async (request) => {
   }
 });
 
-// Updates the caller's own payout wallet address, enforcing server-side
-// that no two accounts can share the same address. This is the ONLY way
-// walletAddress can be changed — Firestore rules block direct client
-// writes to this field.
 exports.updateWalletAddress = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const uid = request.auth.uid;
@@ -515,10 +501,11 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
 });
 
 // ============================================
-// DEPOSIT SYSTEM (server-side verified, unique address per request)
+// DEPOSIT SYSTEM (server-side verified, unique address per request,
+// with automatic sweep of confirmed deposits into the master wallet)
 // ============================================
 
-async function createPendingDepositRecord(db, userId, network, address, expectedAmount) {
+async function createPendingDepositRecord(db, userId, network, address, expectedAmount, derivationIndex) {
   const depositRef = db.collection("depositAddresses").doc();
   const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
   await depositRef.set({
@@ -526,6 +513,7 @@ async function createPendingDepositRecord(db, userId, network, address, expected
     userId,
     network,
     address,
+    derivationIndex,
     expectedAmount: Number(expectedAmount) || 0,
     status: "pending",
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -567,7 +555,7 @@ exports.generateDepositAddress = onCall(
       const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io" });
       const newAddress = tronWeb.address.fromPrivateKey(privateKeyHex);
 
-      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "TRC20", newAddress, amount);
+      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "TRC20", newAddress, amount, assignedIndex);
 
       return { address: newAddress, depositId, expiresAt };
     } catch (error) {
@@ -608,7 +596,7 @@ exports.generateBEP20Address = onCall(
       );
       const newAddress = walletNode.address;
 
-      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "BEP20", newAddress, amount);
+      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "BEP20", newAddress, amount, assignedIndex);
 
       return { address: newAddress, depositId, expiresAt };
     } catch (error) {
@@ -787,11 +775,88 @@ async function checkBEP20OnChainServer(address, expectedAmount, apiKey) {
   }
 }
 
+// ---------- AUTO-SWEEP: consolidates confirmed deposits into the master
+// wallet (derivation index 0 — the SAME address already shown by default
+// in Trust Wallet). The master wallet must be pre-funded with a small
+// reserve of native BNB / TRX to cover gas fees for these sweeps.
+
+const BSC_RPC = "https://bsc-dataseed.binance.org/";
+const USDT_BSC_CONTRACT = "0x55d398326f99059ff775485246999027b3197955";
+const ERC20_ABI = [
+  "function transfer(address to, uint amount) returns (bool)",
+  "function balanceOf(address owner) view returns (uint256)",
+];
+
+async function sweepBEP20Deposit(mnemonic, derivationIndex) {
+  const provider = new ethers.JsonRpcProvider(BSC_RPC);
+
+  const masterWallet = ethers.HDNodeWallet.fromMnemonic(
+    ethers.Mnemonic.fromPhrase(mnemonic), `m/44'/60'/0'/0/0`
+  ).connect(provider);
+
+  const childWallet = ethers.HDNodeWallet.fromMnemonic(
+    ethers.Mnemonic.fromPhrase(mnemonic), `m/44'/60'/0'/0/${derivationIndex}`
+  ).connect(provider);
+
+  const gasReserve = ethers.parseEther("0.0008");
+  const childBnbBalance = await provider.getBalance(childWallet.address);
+
+  if (childBnbBalance < gasReserve) {
+    const fundTx = await masterWallet.sendTransaction({
+      to: childWallet.address,
+      value: gasReserve,
+    });
+    await fundTx.wait();
+  }
+
+  const usdtContract = new ethers.Contract(USDT_BSC_CONTRACT, ERC20_ABI, childWallet);
+  const tokenBalance = await usdtContract.balanceOf(childWallet.address);
+
+  if (tokenBalance > 0n) {
+    const sweepTx = await usdtContract.transfer(masterWallet.address, tokenBalance);
+    await sweepTx.wait();
+  }
+}
+
+async function sweepTRC20Deposit(mnemonic, derivationIndex) {
+  const seed = await bip39.mnemonicToSeed(mnemonic);
+  const hdwallet = HDKey.fromMasterSeed ? HDKey.fromMasterSeed(seed) : HDKey.default.fromMasterSeed(seed);
+
+  const masterNode = hdwallet.derive(`m/44'/195'/0'/0/0`);
+  const childNode = hdwallet.derive(`m/44'/195'/0'/0/${derivationIndex}`);
+
+  const masterPrivateKeyHex = masterNode.privateKey.toString("hex");
+  const childPrivateKeyHex = childNode.privateKey.toString("hex");
+
+  const masterTronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: masterPrivateKeyHex });
+  const childTronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: childPrivateKeyHex });
+
+  const masterAddress = masterTronWeb.address.fromPrivateKey(masterPrivateKeyHex);
+  const childAddress = childTronWeb.address.fromPrivateKey(childPrivateKeyHex);
+
+  const childTrxBalance = await childTronWeb.trx.getBalance(childAddress);
+  const feeReserveSun = 15_000_000; // ~15 TRX buffer for a USDT TRC20 transfer
+
+  if (childTrxBalance < feeReserveSun) {
+    await masterTronWeb.trx.sendTransaction(childAddress, feeReserveSun);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+
+  const usdtContractAddress = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+  const contract = await childTronWeb.contract().at(usdtContractAddress);
+  const balance = await contract.balanceOf(childAddress).call();
+
+  if (Number(balance) > 0) {
+    await contract.transfer(masterAddress, balance).send({ from: childAddress });
+  }
+}
+
 exports.checkPendingDeposits = onSchedule(
-  { schedule: "every 3 minutes", secrets: ["ETHERSCAN_API_KEY"] },
+  { schedule: "every 3 minutes", secrets: ["ETHERSCAN_API_KEY", "TRON_MNEMONIC"] },
   async () => {
     const db = admin.firestore();
     const apiKey = process.env.ETHERSCAN_API_KEY;
+    const mnemonic = process.env.TRON_MNEMONIC;
 
     const pendingSnap = await db.collection("depositAddresses").where("status", "==", "pending").get();
     if (pendingSnap.empty) return;
@@ -816,6 +881,17 @@ exports.checkPendingDeposits = onSchedule(
           await creditVerifiedDeposit(db, docSnap.ref, data.userId, found.amount, found.txId);
         } catch (creditError) {
           console.error(`Failed to credit deposit ${docSnap.id}:`, creditError);
+          continue;
+        }
+
+        try {
+          if (data.network === "BEP20" && mnemonic && data.derivationIndex !== undefined) {
+            await sweepBEP20Deposit(mnemonic, data.derivationIndex);
+          } else if (data.network === "TRC20" && mnemonic && data.derivationIndex !== undefined) {
+            await sweepTRC20Deposit(mnemonic, data.derivationIndex);
+          }
+        } catch (sweepError) {
+          console.error(`Sweep failed for deposit ${docSnap.id} (funds remain safely at ${data.address}):`, sweepError);
         }
       }
     }
