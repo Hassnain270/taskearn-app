@@ -156,6 +156,7 @@ export default function HomeScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [totalBalance, setTotalBalance] = useState(0.00);
   const [todayIncome, setTodayIncome] = useState(0.00);
+  const [lastTaskReset, setLastTaskReset] = useState(null);
   const [totalEarnings, setTotalEarnings] = useState(0.00);
   const [totalWithdraw, setTotalWithdraw] = useState(0.00);
   const [teamReward, setTeamReward] = useState(0.00);
@@ -183,6 +184,30 @@ export default function HomeScreen({ navigation, route }) {
 
   const vipLevel = getLiveVipLevel(totalBalance);
 
+  // Same 4 PM UTC (9 PM PKT) daily boundary used everywhere else (Tasks
+  // screen, backend). The server only actually resets todayEarnings the
+  // NEXT time a task is completed, so if the day has rolled over and no
+  // task has been done yet today, the stored Firestore value is stale —
+  // this computes the correct "live" value for display without needing to
+  // wait for a task to be completed.
+  const getCurrentDayBoundary = () => {
+    const now = new Date();
+    let boundary = new Date();
+    boundary.setUTCHours(16, 0, 0, 0);
+    if (now.getTime() < boundary.getTime()) {
+      boundary.setUTCDate(boundary.getUTCDate() - 1);
+    }
+    return boundary;
+  };
+
+  const isStoredTodayIncomeStale = () => {
+    if (!lastTaskReset) return false;
+    const boundary = getCurrentDayBoundary();
+    return lastTaskReset.getTime() < boundary.getTime();
+  };
+
+  const effectiveTodayIncome = isStoredTodayIncomeStale() ? 0 : todayIncome;
+
   useEffect(() => {
     setCombinedTickerText(generateRandomTickerText());
   }, []);
@@ -200,6 +225,12 @@ export default function HomeScreen({ navigation, route }) {
       setTotalWithdraw(Number(passedUser.totalWithdraw || 0));
       setTeamReward(Number(passedUser.teamReward || 0));
       setTaskCount(Number(passedUser.taskCount || 0));
+      if (passedUser.lastTaskReset) {
+        const resetDate = typeof passedUser.lastTaskReset.toDate === 'function'
+          ? passedUser.lastTaskReset.toDate()
+          : new Date(passedUser.lastTaskReset);
+        setLastTaskReset(resetDate);
+      }
       setLoading(false);
     }
 
@@ -218,6 +249,14 @@ export default function HomeScreen({ navigation, route }) {
           setTotalWithdraw(Number(data.totalWithdraw || 0));
           setTeamReward(Number(data.teamReward || 0));
           setTaskCount(Number(data.taskCount || 0));
+          if (data.lastTaskReset) {
+            const resetDate = typeof data.lastTaskReset.toDate === 'function'
+              ? data.lastTaskReset.toDate()
+              : new Date(data.lastTaskReset);
+            setLastTaskReset(resetDate);
+          } else {
+            setLastTaskReset(null);
+          }
         }
         setLoading(false);
       }, (error) => {
@@ -339,7 +378,7 @@ export default function HomeScreen({ navigation, route }) {
         <View style={styles.statsGrid}>
           <View style={currentStyles.statsCard}>
             <Text style={styles.statsLabel}>TODAY'S INCOME</Text>
-            <Text style={[styles.statsValue, { color: '#22C55E' }]}>${todayIncome.toFixed(2)}</Text>
+            <Text style={[styles.statsValue, { color: '#22C55E' }]}>${effectiveTodayIncome.toFixed(2)}</Text>
           </View>
           <View style={currentStyles.statsCard}>
             <Text style={styles.statsLabel}>TOTAL EARNINGS</Text>
