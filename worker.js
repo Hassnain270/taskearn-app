@@ -64,8 +64,12 @@ export default {
       });
     }
 
-    if (url.pathname === '/') {
-      return new Response('TaskEarn API / Redirection Service Running', { status: 200 });
+    if (env.ASSETS) {
+      const assetResponse = await env.ASSETS.fetch(request);
+      if (assetResponse.status !== 404) {
+        return assetResponse;
+      }
+      return env.ASSETS.fetch(new Request(new URL('/index.html', request.url), request));
     }
 
     return new Response('404 Not Found', { status: 404 });
