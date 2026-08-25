@@ -401,13 +401,11 @@ exports.requestWithdrawal = onCall(async (request) => {
         fee: Number(fee || 0),
         netPayout: Number(netPayout || amount),
         walletAddress: walletAddress,
+        walletNetwork: userData.walletNetwork || "TRC20",
         status: "pending",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // A "pending" entry is also written to transactions right away, so the
-      // request shows up immediately in the user's History screen instead
-      // of only appearing once an admin later approves or rejects it.
       const withdrawalTxRef = db.collection("transactions").doc();
       transaction.set(withdrawalTxRef, {
         transactionId: withdrawalTxRef.id,
@@ -434,7 +432,7 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
   const adminUid = request.auth.uid;
-  const { withdrawalId, newStatus } = request.data || {};
+  const { withdrawalId, newStatus, reason } = request.data || {};
 
   if (!withdrawalId || !["completed", "rejected"].includes(newStatus)) {
     throw new HttpsError("invalid-argument", "A valid withdrawalId and newStatus ('completed' or 'rejected') are required.");
@@ -448,6 +446,7 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
   }
 
   const withdrawalRef = db.collection("withdrawals").doc(withdrawalId);
+  const cleanReason = (reason || "").trim();
 
   try {
     await db.runTransaction(async (transaction) => {
@@ -463,18 +462,21 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
       const userRef = db.collection("users").doc(targetUserId);
       const linkedTxQuery = db.collection("transactions").where("withdrawalId", "==", withdrawalId).limit(1);
 
-      // All reads must happen before any writes in a Firestore transaction.
       const [userDoc, linkedTxSnap] = await Promise.all([
         transaction.get(userRef),
         transaction.get(linkedTxQuery),
       ]);
       const linkedTxRef = !linkedTxSnap.empty ? linkedTxSnap.docs[0].ref : null;
 
-      transaction.update(withdrawalRef, {
+      const withdrawalUpdate = {
         status: newStatus,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         processedBy: adminUid,
-      });
+      };
+      if (newStatus === "rejected" && cleanReason) {
+        withdrawalUpdate.rejectionReason = cleanReason;
+      }
+      transaction.update(withdrawalRef, withdrawalUpdate);
 
       if (newStatus === "rejected") {
         if (userDoc.exists) {
@@ -489,12 +491,14 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
           });
         }
 
-        // Update the existing pending transaction record to reflect the
-        // rejection + refund, rather than creating a duplicate entry.
+        const rejectTitle = cleanReason
+          ? `Withdrawal Rejected - Refunded (${cleanReason})`
+          : "Withdrawal Rejected - Refunded";
+
         if (linkedTxRef) {
           transaction.update(linkedTxRef, {
             status: "approved",
-            title: "Withdrawal Rejected - Refunded",
+            title: rejectTitle,
             type: "WITHDRAWAL_REJECTED_REFUND",
             isCredit: true,
           });
@@ -506,7 +510,7 @@ exports.updateWithdrawalStatus = onCall(async (request) => {
             type: "WITHDRAWAL_REJECTED_REFUND",
             amount: Number(withdrawalData.amount || 0),
             status: "approved",
-            title: "Withdrawal Rejected - Refunded",
+            title: rejectTitle,
             isCredit: true,
             withdrawalId: withdrawalId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),

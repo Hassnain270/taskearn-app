@@ -27,8 +27,8 @@ const TYPE_LABELS = {
 };
 
 const TYPE_ICONS = {
-  DEPOSIT: 'cash-plus',
-  WITHDRAWAL: 'cash-minus',
+  DEPOSIT: 'card-plus-outline',
+  WITHDRAWAL: 'card-minus-outline',
   WELCOME_BONUS: 'gift-outline',
   DIRECT_REFERRAL_BONUS: 'account-plus-outline',
   INDIRECT_REFERRAL_BONUS: 'account-multiple-plus-outline',
@@ -36,6 +36,11 @@ const TYPE_ICONS = {
   WITHDRAWAL_REJECTED_REFUND: 'cash-refund',
   TASK_PROFIT: 'clipboard-check-outline',
 };
+
+// Only these types show a status pill — deposits/withdrawals go through a
+// real verification/approval step, so their state is worth surfacing.
+// Instant bonuses (welcome, referral, VIP upgrade) don't need one.
+const TYPES_WITH_STATUS_BADGE = ['DEPOSIT', 'WITHDRAWAL', 'WITHDRAWAL_REJECTED_REFUND'];
 
 const TABS = [
   { key: 'all', label: 'All' },
@@ -84,13 +89,14 @@ export default function HistoryScreen({ navigation }) {
   const formatDate = (createdAt) => {
     if (!createdAt) return '';
     const date = typeof createdAt.toDate === 'function' ? createdAt.toDate() : new Date(createdAt);
-    return date.toLocaleString([], {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
+    const day = date.getDate();
+    const month = date.toLocaleString([], { month: 'short' });
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return `${day} ${month}, ${hours}:${minutes} ${ampm}`;
   };
 
   const getIsCredit = (item) => {
@@ -112,10 +118,11 @@ export default function HistoryScreen({ navigation }) {
     const isCredit = getIsCredit(item);
     const accentColor = isCredit ? '#22C55E' : '#EF4444';
     const isPending = item.status === 'pending';
+    const showBadge = TYPES_WITH_STATUS_BADGE.includes(item.type);
 
     return (
       <View style={currentStyles.itemRow}>
-        <MaterialCommunityIcons name={iconName} size={22} color={accentColor} style={styles.itemIcon} />
+        <MaterialCommunityIcons name={iconName} size={24} color={accentColor} style={styles.itemIcon} />
 
         <View style={styles.middleColumn}>
           <Text style={currentStyles.itemTitle} numberOfLines={1}>{displayType}</Text>
@@ -129,17 +136,19 @@ export default function HistoryScreen({ navigation }) {
           <Text style={[styles.itemAmount, { color: accentColor }]}>
             {isCredit ? '+' : '-'}${Number(item.amount || 0).toFixed(2)}
           </Text>
-          <View style={[
-            styles.statusBadge,
-            isPending ? styles.pendingBadge : styles.approvedBadge
-          ]}>
-            <Text style={[
-              styles.statusText,
-              isPending ? styles.pendingText : styles.approvedText
+          {showBadge && (
+            <View style={[
+              styles.statusBadge,
+              isPending ? styles.pendingBadge : styles.approvedBadge
             ]}>
-              {isPending ? 'PENDING' : 'APPROVED'}
-            </Text>
-          </View>
+              <Text style={[
+                styles.statusText,
+                isPending ? styles.pendingText : styles.approvedText
+              ]}>
+                {isPending ? 'PENDING' : 'APPROVED'}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
     );
@@ -166,6 +175,7 @@ export default function HistoryScreen({ navigation }) {
             key={tab.key}
             style={styles.tabItem}
             onPress={() => setActiveTab(tab.key)}
+            activeOpacity={0.7}
           >
             <Text style={[
               currentStyles.tabLabel,
@@ -206,21 +216,21 @@ const lightStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1E293B' },
-  tabsRow: { flexDirection: 'row', backgroundColor: '#FFFFFF', paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  tabLabel: { fontSize: 13, fontWeight: '600', color: '#94A3B8', paddingVertical: 14 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14 },
-  itemTitle: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
+  tabsRow: { flexDirection: 'row', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingTop: 4, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  tabLabel: { fontSize: 14, fontWeight: '600', color: '#94A3B8', paddingVertical: 14 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 16 },
+  itemTitle: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
   separator: { height: 1, backgroundColor: '#F1F5F9' }
 });
 
 const darkStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E14' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
-  tabsRow: { flexDirection: 'row', backgroundColor: '#161B22', paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#21262D' },
-  tabLabel: { fontSize: 13, fontWeight: '600', color: '#8B949E', paddingVertical: 14 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B0E14', paddingHorizontal: 16, paddingVertical: 14 },
-  itemTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0B0E14', paddingHorizontal: 16, paddingVertical: 14 },
+  headerTitle: { fontSize: 17, fontWeight: 'bold', color: '#FFFFFF' },
+  tabsRow: { flexDirection: 'row', backgroundColor: '#0B0E14', paddingHorizontal: 16, paddingTop: 4 },
+  tabLabel: { fontSize: 14, fontWeight: '600', color: '#8B949E', paddingVertical: 14 },
+  itemRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#0B0E14', paddingHorizontal: 16, paddingVertical: 16 },
+  itemTitle: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
   separator: { height: 1, backgroundColor: '#161B22' }
 });
 
@@ -228,18 +238,18 @@ const styles = StyleSheet.create({
   backBtn: { padding: 2 },
   loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContainer: { flexGrow: 1 },
-  tabItem: { marginRight: 28, alignItems: 'center' },
+  tabItem: { marginRight: 32, alignItems: 'center' },
   tabLabelActive: { color: '#3B82F6' },
   tabUnderline: { height: 2, width: '100%', backgroundColor: '#3B82F6', borderRadius: 1, marginTop: -2 },
-  itemIcon: { marginRight: 14 },
-  middleColumn: { flex: 1, paddingRight: 8, gap: 2 },
-  itemMeta: { fontSize: 11, fontWeight: '500', color: '#94A3B8' },
+  itemIcon: { marginRight: 14, marginTop: 2 },
+  middleColumn: { flex: 1, paddingRight: 8, gap: 3 },
+  itemMeta: { fontSize: 12, fontWeight: '500', color: '#8B949E' },
   rightColumn: { alignItems: 'flex-end', gap: 6 },
-  itemAmount: { fontSize: 15, fontWeight: 'bold' },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  itemAmount: { fontSize: 17, fontWeight: 'bold' },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   pendingBadge: { backgroundColor: '#FEF3C7' },
   approvedBadge: { backgroundColor: '#D1FAE5' },
-  statusText: { fontSize: 9, fontWeight: '800' },
+  statusText: { fontSize: 10, fontWeight: '800' },
   pendingText: { color: '#D97706' },
   approvedText: { color: '#059669' },
   emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingTop: 60, gap: 8 },
