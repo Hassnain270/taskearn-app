@@ -104,6 +104,22 @@ export default function HistoryScreen({ navigation }) {
     return item.type !== 'WITHDRAWAL';
   };
 
+  // Determines what the status pill should say. A rejected-and-refunded
+  // withdrawal has status:"approved" on the underlying record (meaning the
+  // refund itself completed successfully) — but showing "APPROVED" there
+  // reads as if the withdrawal was approved, which is the opposite of what
+  // happened. So this type always shows "REJECTED" regardless of the raw
+  // status field.
+  const getBadgeInfo = (item) => {
+    if (item.type === 'WITHDRAWAL_REJECTED_REFUND') {
+      return { label: 'REJECTED', variant: 'rejected' };
+    }
+    if (item.status === 'pending') {
+      return { label: 'PENDING', variant: 'pending' };
+    }
+    return { label: 'APPROVED', variant: 'approved' };
+  };
+
   const filteredTransactions = transactions.filter((item) => {
     if (activeTab === 'all') return true;
     const isCredit = getIsCredit(item);
@@ -117,8 +133,15 @@ export default function HistoryScreen({ navigation }) {
     const iconName = TYPE_ICONS[item.type] || 'swap-horizontal';
     const isCredit = getIsCredit(item);
     const accentColor = isCredit ? '#22C55E' : '#EF4444';
-    const isPending = item.status === 'pending';
     const showBadge = TYPES_WITH_STATUS_BADGE.includes(item.type);
+    const badgeInfo = getBadgeInfo(item);
+
+    const badgeStyleMap = {
+      pending: [styles.pendingBadge, styles.pendingText],
+      approved: [styles.approvedBadge, styles.approvedText],
+      rejected: [styles.rejectedBadge, styles.rejectedText],
+    };
+    const [badgeBgStyle, badgeTextStyle] = badgeStyleMap[badgeInfo.variant];
 
     return (
       <View style={currentStyles.itemRow}>
@@ -137,15 +160,9 @@ export default function HistoryScreen({ navigation }) {
             {isCredit ? '+' : '-'}${Number(item.amount || 0).toFixed(2)}
           </Text>
           {showBadge && (
-            <View style={[
-              styles.statusBadge,
-              isPending ? styles.pendingBadge : styles.approvedBadge
-            ]}>
-              <Text style={[
-                styles.statusText,
-                isPending ? styles.pendingText : styles.approvedText
-              ]}>
-                {isPending ? 'PENDING' : 'APPROVED'}
+            <View style={[styles.statusBadge, badgeBgStyle]}>
+              <Text style={[styles.statusText, badgeTextStyle]}>
+                {badgeInfo.label}
               </Text>
             </View>
           )}
@@ -249,9 +266,11 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   pendingBadge: { backgroundColor: '#FEF3C7' },
   approvedBadge: { backgroundColor: '#D1FAE5' },
+  rejectedBadge: { backgroundColor: '#FEE2E2' },
   statusText: { fontSize: 10, fontWeight: '800' },
   pendingText: { color: '#D97706' },
   approvedText: { color: '#059669' },
+  rejectedText: { color: '#DC2626' },
   emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingTop: 60, gap: 8 },
   emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500' }
 });
