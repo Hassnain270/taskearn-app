@@ -43,12 +43,17 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     // withdrawals/{id}
     // Only Cloud Functions (Admin SDK, which bypasses these rules)
-    // may create or modify withdrawal records. The client may only
-    // read its own withdrawal history.
+    // may create or modify withdrawal records. A normal user may
+    // read only their own withdrawal history; an admin (isAdmin:true
+    // on their own user doc) may read ALL withdrawals, needed for
+    // the Withdrawal Approvals screen.
     // ---------------------------------------------------------------
     match /withdrawals/{withdrawalId} {
       allow read: if request.auth != null
-                  && resource.data.userId == request.auth.uid;
+                  && (
+                    resource.data.userId == request.auth.uid
+                    || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+                  );
       allow write: if false; // server-only (Admin SDK bypasses rules)
     }
 
@@ -65,9 +70,6 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     // depositAddresses/{id}  (live pending-deposit status watched by
     // DepositScreen.js so it can show a "Deposit Confirmed" popup).
-    // The scheduled Cloud Function verifies and credits deposits via
-    // the Admin SDK regardless of this rule — this only controls
-    // whether the CLIENT can watch its own deposit's live status.
     // ---------------------------------------------------------------
     match /depositAddresses/{depositId} {
       allow read: if request.auth != null
