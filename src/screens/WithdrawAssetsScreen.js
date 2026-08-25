@@ -62,19 +62,26 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
   const parsedAmount = parseFloat(withdrawAmount) || 0;
   const hasWallet = walletAddress.trim() !== "";
-  
+
+  const operationalFee = parsedAmount > 0 ? Number((parsedAmount * 0.07).toFixed(2)) : 0;
+  const netPayoutPreview = parsedAmount > 0 ? Number((parsedAmount - operationalFee).toFixed(2)) : 0;
+
   const isTaskCompleted = completedTaskCount >= 5;
   const isValidAmount = parsedAmount >= 15 && parsedAmount <= withdrawableBalance;
   const isButtonEnabled = hasWallet && isTaskCompleted && isValidAmount && !loading;
 
   const executeWithdrawal = async () => {
-    const operationalFee = parsedAmount * 0.07;
-    const finalPayout = parsedAmount - operationalFee;
+    const finalPayout = netPayoutPreview;
 
     setLoading(true);
     try {
       const requestWithdrawal = httpsCallable(functionsInstance, 'requestWithdrawal');
-      const res = await requestWithdrawal({ amount: parsedAmount });
+      const res = await requestWithdrawal({
+        amount: parsedAmount,
+        fee: operationalFee,
+        netPayout: finalPayout,
+        walletAddress: walletAddress
+      });
 
       Alert.alert(
         "Payout Request Received",
@@ -221,7 +228,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            
+
             {parsedAmount > 0 && parsedAmount < 15 && (
               <Text style={styles.errorText}>Minimum liquidity settlement threshold is $15.00 USDT.</Text>
             )}
@@ -232,6 +239,23 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
               <Text style={styles.errorText}>You must complete 5 tasks before withdrawing (Current: {completedTaskCount}/5).</Text>
             )}
           </View>
+
+          {parsedAmount > 0 && (
+            <View style={currentStyles.summaryBox}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Withdrawal Amount:</Text>
+                <Text style={currentStyles.summaryValue}>${parsedAmount.toFixed(2)} USDT</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Handling Fee (7%):</Text>
+                <Text style={styles.feeValue}>-${operationalFee.toFixed(2)} USDT</Text>
+              </View>
+              <View style={[styles.summaryRow, currentStyles.totalRowBorder]}>
+                <Text style={styles.totalLabel}>You Will Receive:</Text>
+                <Text style={currentStyles.totalValue}>${netPayoutPreview.toFixed(2)} USDT</Text>
+              </View>
+            </View>
+          )}
 
           <View style={currentStyles.termsBox}>
             <View style={styles.termsHeaderRow}>
@@ -296,6 +320,10 @@ const lightStyles = StyleSheet.create({
   disabledInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, height: 54, paddingHorizontal: 16 },
   disabledInputText: { color: '#64748B', fontSize: 13, fontWeight: '600', width: '80%' },
   textInput: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, height: 54, paddingHorizontal: 16, fontSize: 14, color: '#1E293B', fontWeight: '600' },
+  summaryBox: { backgroundColor: '#FFFFFF', borderRadius: 15, padding: 16, borderStyle: 'dashed', borderWidth: 1, borderColor: '#CBD5E1', marginTop: 4, marginBottom: 20, gap: 10 },
+  summaryValue: { color: '#1E293B', fontSize: 14, fontWeight: '600' },
+  totalRowBorder: { borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 10, marginTop: 4 },
+  totalValue: { color: '#2563EB', fontSize: 16, fontWeight: 'bold' },
   termsBox: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, marginTop: 10, borderWidth: 1, borderColor: '#E2E8F0' },
   termsTitle: { fontSize: 11, fontWeight: '700', color: '#1E293B', letterSpacing: 0.5 },
   footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
@@ -312,6 +340,10 @@ const darkStyles = StyleSheet.create({
   disabledInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117', borderWidth: 1, borderColor: '#21262D', borderRadius: 16, height: 54, paddingHorizontal: 16 },
   disabledInputText: { color: '#8B949E', fontSize: 13, fontWeight: '600', width: '80%' },
   textInput: { backgroundColor: '#161B22', borderWidth: 1, borderColor: '#21262D', borderRadius: 16, height: 54, paddingHorizontal: 16, fontSize: 14, color: '#FFFFFF', fontWeight: '600' },
+  summaryBox: { backgroundColor: '#161B22', borderRadius: 15, padding: 16, borderStyle: 'dashed', borderWidth: 1, borderColor: '#334155', marginTop: 4, marginBottom: 20, gap: 10 },
+  summaryValue: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  totalRowBorder: { borderTopWidth: 1, borderTopColor: '#21262D', paddingTop: 10, marginTop: 4 },
+  totalValue: { color: '#60A5FA', fontSize: 16, fontWeight: 'bold' },
   termsBox: { backgroundColor: '#161B22', borderRadius: 16, padding: 18, marginTop: 10, borderWidth: 1, borderColor: '#21262D' },
   termsTitle: { fontSize: 11, fontWeight: '700', color: '#E2E8F0', letterSpacing: 0.5 },
   footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#21262D' },
@@ -328,6 +360,10 @@ const styles = StyleSheet.create({
   inputGroup: { marginBottom: 24 },
   inputLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.8, marginBottom: 10, paddingLeft: 4 },
   errorText: { fontSize: 11, color: '#EF4444', fontWeight: '600', marginTop: 8, paddingLeft: 4 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  summaryLabel: { color: '#94A3B8', fontSize: 13 },
+  feeValue: { fontSize: 14, fontWeight: '700', color: '#EF4444' },
+  totalLabel: { fontSize: 14, fontWeight: 'bold', color: '#94A3B8' },
   termsHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
   bulletRow: { flexDirection: 'row', marginBottom: 10, paddingHorizontal: 2 },
   bullet: { color: '#94A3B8', fontSize: 14, marginRight: 8, marginTop: -2 },
