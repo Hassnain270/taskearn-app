@@ -23,6 +23,29 @@ import { ThemeContext } from '../../ThemeContext';
 
 const functionsInstance = getFunctions();
 
+// Mirrors the exact same VIP tier table used server-side (functions/index.js),
+// so the locked-capital figure shown here always matches what the backend
+// will actually enforce when the withdrawal request is processed.
+const VIP_TIERS = [
+  { id: 10, minCapital: 20000 },
+  { id: 9,  minCapital: 10000 },
+  { id: 8,  minCapital: 5000 },
+  { id: 7,  minCapital: 3000 },
+  { id: 6,  minCapital: 1500 },
+  { id: 5,  minCapital: 1000 },
+  { id: 4,  minCapital: 500 },
+  { id: 3,  minCapital: 300 },
+  { id: 2,  minCapital: 150 },
+  { id: 1,  minCapital: 70 },
+];
+
+const calculateVipLockedCapital = (balance) => {
+  for (const tier of VIP_TIERS) {
+    if (balance >= tier.minCapital) return tier.minCapital;
+  }
+  return 0;
+};
+
 export default function WithdrawAssetsScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
@@ -56,7 +79,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
     }
   }, []);
 
-  const vipLockedCapital = incomingBalance > 0 ? (incomingBalance >= 150.00 ? 150.00 : 70.00) : 0.00;
+  const vipLockedCapital = calculateVipLockedCapital(incomingBalance);
   const withdrawableBalance = incomingBalance > vipLockedCapital ? parseFloat((incomingBalance - vipLockedCapital).toFixed(2)) : 0.00;
 
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
