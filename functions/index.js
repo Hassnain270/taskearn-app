@@ -754,23 +754,31 @@ async function checkTRC20OnChainServer(address, expectedAmount) {
 async function checkBEP20OnChainServer(address, expectedAmount, apiKey) {
   try {
     const usdtContractBSC = "0x55d398326f99059ff775485246999027b3197955";
-    const response = await fetch(
-      `https://api.etherscan.io/v2/api?chainid=56&module=account&action=tokentx&contractaddress=${usdtContractBSC}&address=${address}&page=1&offset=20&sort=desc&apikey=${apiKey}`
-    );
+    const url = `https://api.etherscan.io/v2/api?chainid=56&module=account&action=tokentx&contractaddress=${usdtContractBSC}&address=${address}&page=1&offset=20&sort=desc&apikey=${apiKey}`;
+    const response = await fetch(url);
     const data = await response.json();
-    if (data.status !== "1" || !data.result || data.result.length === 0) return null;
+
+    console.log(`[BEP20 CHECK] address=${address} expected=${expectedAmount} status=${data.status} message=${data.message} resultCount=${Array.isArray(data.result) ? data.result.length : "N/A"}`);
+
+    if (data.status !== "1" || !data.result || data.result.length === 0) {
+      console.log(`[BEP20 CHECK] No results or API error for ${address}. Full response: ${JSON.stringify(data).substring(0, 500)}`);
+      return null;
+    }
 
     for (const tx of data.result) {
+      console.log(`[BEP20 CHECK] tx to=${tx.to} value=${tx.value} hash=${tx.hash}`);
       if (tx.to.toLowerCase() === address.toLowerCase()) {
         const receivedAmount = parseFloat(tx.value) / Math.pow(10, 18);
+        console.log(`[BEP20 CHECK] Match found! received=${receivedAmount} expected=${expectedAmount}`);
         if (receivedAmount >= expectedAmount) {
           return { amount: receivedAmount, txId: tx.hash };
         }
       }
     }
+    console.log(`[BEP20 CHECK] No matching transaction met the expected amount for ${address}.`);
     return null;
   } catch (error) {
-    console.error("BEP20 on-chain check error:", error);
+    console.error("BEP20 on-chain check error:", error.message, error);
     return null;
   }
 }
@@ -801,20 +809,25 @@ async function sweepBEP20Deposit(mnemonic, derivationIndex) {
   const gasReserve = ethers.parseEther("0.0008");
   const childBnbBalance = await provider.getBalance(childWallet.address);
 
+  console.log(`[SWEEP-BEP20] child=${childWallet.address} master=${masterWallet.address} childBnb=${childBnbBalance.toString()}`);
+
   if (childBnbBalance < gasReserve) {
     const fundTx = await masterWallet.sendTransaction({
       to: childWallet.address,
       value: gasReserve,
     });
     await fundTx.wait();
+    console.log(`[SWEEP-BEP20] Funded child with gas. tx=${fundTx.hash}`);
   }
 
   const usdtContract = new ethers.Contract(USDT_BSC_CONTRACT, ERC20_ABI, childWallet);
   const tokenBalance = await usdtContract.balanceOf(childWallet.address);
+  console.log(`[SWEEP-BEP20] childUsdtBalance=${tokenBalance.toString()}`);
 
   if (tokenBalance > 0n) {
     const sweepTx = await usdtContract.transfer(masterWallet.address, tokenBalance);
     await sweepTx.wait();
+    console.log(`[SWEEP-BEP20] Swept ${tokenBalance.toString()} to master. tx=${sweepTx.hash}`);
   }
 }
 
@@ -835,19 +848,24 @@ async function sweepTRC20Deposit(mnemonic, derivationIndex) {
   const childAddress = childTronWeb.address.fromPrivateKey(childPrivateKeyHex);
 
   const childTrxBalance = await childTronWeb.trx.getBalance(childAddress);
-  const feeReserveSun = 15_000_000; // ~15 TRX buffer for a USDT TRC20 transfer
+  const feeReserveSun = 15_000_000;
+
+  console.log(`[SWEEP-TRC20] child=${childAddress} master=${masterAddress} childTrx=${childTrxBalance}`);
 
   if (childTrxBalance < feeReserveSun) {
     await masterTronWeb.trx.sendTransaction(childAddress, feeReserveSun);
+    console.log(`[SWEEP-TRC20] Funded child with TRX for fees.`);
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 
   const usdtContractAddress = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
   const contract = await childTronWeb.contract().at(usdtContractAddress);
   const balance = await contract.balanceOf(childAddress).call();
+  console.log(`[SWEEP-TRC20] childUsdtBalance=${balance.toString()}`);
 
   if (Number(balance) > 0) {
     await contract.transfer(masterAddress, balance).send({ from: childAddress });
+    console.log(`[SWEEP-TRC20] Swept ${balance.toString()} to master.`);
   }
 }
 
@@ -858,13 +876,18 @@ exports.checkPendingDeposits = onSchedule(
     const apiKey = process.env.ETHERSCAN_API_KEY;
     const mnemonic = process.env.TRON_MNEMONIC;
 
+    console.log(`[SCHEDULER] Run started. apiKeyPresent=${!!apiKey} mnemonicPresent=${!!mnemonic}`);
+
     const pendingSnap = await db.collection("depositAddresses").where("status", "==", "pending").get();
+    console.log(`[SCHEDULER] Found ${pendingSnap.size} pending deposit(s) to check.`);
     if (pendingSnap.empty) return;
 
     for (const docSnap of pendingSnap.docs) {
       const data = docSnap.data();
+      console.log(`[SCHEDULER] Checking deposit ${docSnap.id}: network=${data.network} address=${data.address} expected=${data.expectedAmount} derivationIndex=${data.derivationIndex}`);
 
       if (data.expiresAt && Date.now() > data.expiresAt) {
+        console.log(`[SCHEDULER] Deposit ${docSnap.id} has expired.`);
         await docSnap.ref.update({ status: "expired" });
         continue;
       }
@@ -876,11 +899,14 @@ exports.checkPendingDeposits = onSchedule(
         found = await checkBEP20OnChainServer(data.address, data.expectedAmount, apiKey);
       }
 
+      console.log(`[SCHEDULER] Result for ${docSnap.id}: ${found ? JSON.stringify(found) : "not found yet"}`);
+
       if (found) {
         try {
           await creditVerifiedDeposit(db, docSnap.ref, data.userId, found.amount, found.txId);
+          console.log(`[SCHEDULER] Successfully credited deposit ${docSnap.id}.`);
         } catch (creditError) {
-          console.error(`Failed to credit deposit ${docSnap.id}:`, creditError);
+          console.error(`[SCHEDULER] Failed to credit deposit ${docSnap.id}:`, creditError.message, creditError);
           continue;
         }
 
@@ -891,7 +917,7 @@ exports.checkPendingDeposits = onSchedule(
             await sweepTRC20Deposit(mnemonic, data.derivationIndex);
           }
         } catch (sweepError) {
-          console.error(`Sweep failed for deposit ${docSnap.id} (funds remain safely at ${data.address}):`, sweepError);
+          console.error(`[SCHEDULER] Sweep failed for deposit ${docSnap.id} (funds remain safely at ${data.address}):`, sweepError.message, sweepError);
         }
       }
     }
