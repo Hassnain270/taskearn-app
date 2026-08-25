@@ -20,8 +20,8 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { sendEmailOTP, verifyOTP } from '../services/otpService';
 import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
 
@@ -175,6 +175,9 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // Looks up the account's email (and other non-sensitive metadata) via a
+  // Cloud Function, since this must run BEFORE the user is signed in — the
+  // client cannot query other users' Firestore documents directly.
   const handleLogin = async () => {
     const inputIdentifier = username.trim();
     const cleanPassword = password.trim();
@@ -187,34 +190,18 @@ export default function LoginScreen({ navigation }) {
     setIsLoading(true);
 
     try {
-      let userEmail = '';
-      let userDocRef = null;
-      let existingData = null;
-
-      if (inputIdentifier.includes('@')) {
-        userEmail = inputIdentifier;
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where("email", "==", inputIdentifier));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          userDocRef = doc(db, 'users', querySnapshot.docs[0].id);
-          existingData = { uid: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() };
-        }
-      } else {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where("username", "==", inputIdentifier));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-          const matchedDoc = querySnapshot.docs[0];
-          userDocRef = doc(db, 'users', matchedDoc.id);
-          existingData = { uid: matchedDoc.id, ...matchedDoc.data() };
-          if (existingData.email) {
-            userEmail = existingData.email;
-          }
-        }
+      const resolveIdentifier = httpsCallable(functionsInstance, 'resolveLoginIdentifier');
+      let resolved;
+      try {
+        const res = await resolveIdentifier({ identifier: inputIdentifier });
+        resolved = res.data;
+      } catch (resolveErr) {
+        setIsLoading(false);
+        showAlert("Login Failed", "Invalid username or password");
+        return;
       }
 
+      const userEmail = resolved?.email;
       if (!userEmail) {
         setIsLoading(false);
         showAlert("Login Failed", "Invalid username or password");
@@ -227,19 +214,17 @@ export default function LoginScreen({ navigation }) {
       // Safe cross-platform storage
       await setSecureItem(`passkey_email_${uid}`, userEmail);
       await setSecureItem(`passkey_pass_${uid}`, cleanPassword);
+
+      // Now that we're authenticated as this exact uid, we're allowed to
+      // read our own document directly.
+      const userDocRef = doc(db, 'users', uid);
+      const docSnap = await getDoc(userDocRef);
+      let existingData = docSnap.exists() ? { uid, ...docSnap.data() } : { uid };
+
       if (existingData?.username) {
         await setSecureItem(`passkey_user_${existingData.username}`, uid);
       }
 
-      if (!userDocRef) {
-        userDocRef = doc(db, 'users', uid);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
-          existingData = { uid: uid, ...docSnap.data() };
-        }
-      }
-
-      // Web handling for passkey setup
       if (!existingData?.passkeyRegistered && Platform.OS !== 'web') {
         setIsLoading(false);
         showAlert(
@@ -289,30 +274,31 @@ export default function LoginScreen({ navigation }) {
     setIsLoading(true);
 
     try {
-      const usersRef = collection(db, 'users');
-      let q = inputIdentifier.includes('@')
-        ? query(usersRef, where("email", "==", inputIdentifier))
-        : query(usersRef, where("username", "==", inputIdentifier));
-
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
+      const resolveIdentifier = httpsCallable(functionsInstance, 'resolveLoginIdentifier');
+      let resolved;
+      try {
+        const res = await resolveIdentifier({ identifier: inputIdentifier });
+        resolved = res.data;
+      } catch (resolveErr) {
         setIsLoading(false);
         showAlert("Passkey Failed", "User not found.");
         return;
       }
 
-      const userDoc = querySnapshot.docs[0];
-      const matchedDoc = userDoc.data();
-      const targetUid = userDoc.id;
+      const targetUid = resolved?.uid;
+      if (!targetUid) {
+        setIsLoading(false);
+        showAlert("Passkey Failed", "User not found.");
+        return;
+      }
 
-      if (!matchedDoc.passkeyRegistered) {
+      if (!resolved.passkeyRegistered) {
         setIsLoading(false);
         showAlert("Passkey Not Configured", "Please log in with your password first to bind your Passkey.");
         return;
       }
 
-      if (matchedDoc.registeredDeviceId && deviceId && matchedDoc.registeredDeviceId !== deviceId && Platform.OS !== 'web') {
+      if (resolved.registeredDeviceId && deviceId && resolved.registeredDeviceId !== deviceId && Platform.OS !== 'web') {
         setIsLoading(false);
         showAlert(
           "Unauthorized Device",
@@ -338,7 +324,7 @@ export default function LoginScreen({ navigation }) {
         await signInWithEmailAndPassword(auth, savedEmail, savedPass);
 
         const freshSnap = await getDoc(doc(db, 'users', targetUid));
-        const freshData = freshSnap.exists() ? freshSnap.data() : matchedDoc;
+        const freshData = freshSnap.exists() ? freshSnap.data() : {};
         const fullProfileData = { uid: targetUid, id: targetUid, ...freshData };
 
         setIsLoading(false);
@@ -363,20 +349,23 @@ export default function LoginScreen({ navigation }) {
     setIsResetLoading(true);
 
     try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where("username", "==", cleanUsername));
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
+      const resolveIdentifier = httpsCallable(functionsInstance, 'resolveLoginIdentifier');
+      let resolved;
+      try {
+        const res = await resolveIdentifier({ identifier: cleanUsername });
+        resolved = res.data;
+      } catch (resolveErr) {
         setIsResetLoading(false);
         showAlert("Error", "Username does not exist.");
         return;
       }
 
-      let fetchedUserData = null;
-      querySnapshot.forEach((docSnap) => {
-        fetchedUserData = { uid: docSnap.id, ...docSnap.data() };
-      });
+      const fetchedUserData = {
+        uid: resolved.uid,
+        username: resolved.username,
+        email: resolved.email,
+        phone: resolved.phone
+      };
 
       setUserData(fetchedUserData);
 

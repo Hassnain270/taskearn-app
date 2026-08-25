@@ -85,6 +85,7 @@ const VIP_TIERS = [
 ];
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MASTER_REFERRAL_CODES = ["ADMIN1", "123456", "MASTER"];
 
 function calculateVipLockedCapital(balance) {
   for (const tier of VIP_TIERS) {
@@ -134,6 +135,145 @@ function getPktResetBoundaries() {
 
   return { dayResetUtcMs, monthResetUtcMs, monthLabel };
 }
+
+// ============================================
+// CROSS-USER LOOKUPS (must run server-side: either the caller isn't
+// authenticated yet — login, forgot password — or needs to check OTHER
+// users' documents, which Firestore security rules correctly forbid the
+// client from reading directly).
+// ============================================
+
+// Resolves a login identifier (email or username) to the account's email,
+// uid, and the small set of non-sensitive fields needed for the Passkey
+// login flow. Intentionally does NOT require request.auth, since this runs
+// BEFORE the user is signed in.
+exports.resolveLoginIdentifier = onCall(async (request) => {
+  const identifier = (request.data?.identifier || "").trim();
+  if (!identifier) throw new HttpsError("invalid-argument", "Identifier is required.");
+
+  const db = admin.firestore();
+
+  try {
+    let userDoc = null;
+
+    if (identifier.includes("@")) {
+      const q = await db.collection("users").where("email", "==", identifier.toLowerCase()).limit(1).get();
+      if (!q.empty) userDoc = q.docs[0];
+    } else {
+      const q = await db.collection("users").where("username", "==", identifier.toLowerCase()).limit(1).get();
+      if (!q.empty) userDoc = q.docs[0];
+    }
+
+    if (!userDoc) throw new HttpsError("not-found", "No account found for that identifier.");
+
+    const data = userDoc.data();
+    if (!data.email) throw new HttpsError("not-found", "No account found for that identifier.");
+
+    return {
+      uid: userDoc.id,
+      email: data.email,
+      phone: data.phoneNumber || data.phone || null,
+      username: data.username || null,
+      passkeyRegistered: data.passkeyRegistered === true,
+      registeredDeviceId: data.registeredDeviceId || null,
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    console.error("Error in resolveLoginIdentifier:", error);
+    throw new HttpsError("internal", "Lookup failed.");
+  }
+});
+
+// Checks username/email/phone availability and referral code validity
+// during registration, all in one server-side call (runs pre-auth, before
+// the account even exists).
+exports.checkRegistrationAvailability = onCall(async (request) => {
+  const { username, email, phone, referral } = request.data || {};
+  const db = admin.firestore();
+
+  const cleanUsername = (username || "").trim().toLowerCase();
+  const cleanEmail = (email || "").trim().toLowerCase();
+  const cleanPhone = (phone || "").trim();
+  const cleanRef = (referral || "").trim().toUpperCase();
+
+  const result = {
+    usernameTaken: false,
+    emailTaken: false,
+    phoneTaken: false,
+    referralValid: true,
+    referrerUid: null,
+  };
+
+  try {
+    if (cleanUsername) {
+      const q = await db.collection("users").where("username", "==", cleanUsername).limit(1).get();
+      result.usernameTaken = !q.empty;
+    }
+
+    if (cleanEmail) {
+      const q = await db.collection("users").where("email", "==", cleanEmail).limit(1).get();
+      result.emailTaken = !q.empty;
+    }
+
+    if (cleanPhone) {
+      const q = await db.collection("users").where("phoneNumber", "==", cleanPhone).limit(1).get();
+      result.phoneTaken = !q.empty;
+    }
+
+    if (cleanRef && !MASTER_REFERRAL_CODES.includes(cleanRef)) {
+      const q = await db.collection("users").where("referral", "==", cleanRef).limit(1).get();
+      if (q.empty) {
+        result.referralValid = false;
+      } else {
+        result.referrerUid = q.docs[0].id;
+      }
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Error in checkRegistrationAvailability:", error);
+    throw new HttpsError("internal", "Availability check failed.");
+  }
+});
+
+// Updates the caller's own payout wallet address, enforcing server-side
+// that no two accounts can share the same address. This is the ONLY way
+// walletAddress can be changed — Firestore rules block direct client
+// writes to this field.
+exports.updateWalletAddress = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const uid = request.auth.uid;
+  const { walletAddress, network } = request.data || {};
+
+  if (!walletAddress || !network) {
+    throw new HttpsError("invalid-argument", "Wallet address and network are required.");
+  }
+
+  const db = admin.firestore();
+
+  try {
+    const dupQuery = await db.collection("users").where("walletAddress", "==", walletAddress).get();
+    let isDuplicate = false;
+    dupQuery.forEach((docSnap) => {
+      if (docSnap.id !== uid) isDuplicate = true;
+    });
+
+    if (isDuplicate) {
+      throw new HttpsError("already-exists", "This wallet address is already linked with another user account.");
+    }
+
+    await db.collection("users").doc(uid).update({
+      walletAddress: walletAddress,
+      walletNetwork: network,
+    });
+
+    return { success: true };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    console.error("Error in updateWalletAddress:", error);
+    throw new HttpsError("internal", "Failed to update wallet address.");
+  }
+});
 
 exports.calculateTeamStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");

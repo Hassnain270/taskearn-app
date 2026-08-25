@@ -19,7 +19,10 @@ import {
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const functionsInstance = getFunctions();
 
 const MASTER_REFERRAL_CODES = ['ADMIN1', '123456', 'MASTER'];
 
@@ -317,51 +320,44 @@ export default function RegisterScreen({ navigation, route }) {
     if (!validateInputs()) return;
 
     setLoading(true);
-    let referrerUid = null;
     const cleanRefCode = referralCode.trim().toUpperCase();
     const formattedPhone = `${selectedCountry.dial_code}${phoneNumber.replace(/[^0-9]/g, '')}`;
     const cleanUsername = username.trim().toLowerCase();
     const cleanEmail = email.trim().toLowerCase();
 
     try {
-      const usersRef = collection(db, 'users');
+      // A single server-side call checks username/email/phone availability
+      // and referral code validity all at once — the client is not
+      // permitted to query other users' Firestore documents directly.
+      const checkAvailability = httpsCallable(functionsInstance, 'checkRegistrationAvailability');
+      const availabilityRes = await checkAvailability({
+        username: cleanUsername,
+        email: cleanEmail,
+        phone: formattedPhone,
+        referral: cleanRefCode
+      });
 
-      const qUsername = query(usersRef, where('username', '==', cleanUsername));
-      const usernameSnapshot = await getDocs(qUsername);
-      if (!usernameSnapshot.empty) {
+      const { usernameTaken, emailTaken, phoneTaken, referralValid, referrerUid } = availabilityRes.data;
+
+      if (usernameTaken) {
         setLoading(false);
         showAlert('Validation Error', 'Username is already taken. Please choose another.');
         return;
       }
-
-      const qEmail = query(usersRef, where('email', '==', cleanEmail));
-      const emailSnapshot = await getDocs(qEmail);
-      if (!emailSnapshot.empty) {
+      if (emailTaken) {
         setLoading(false);
         showAlert('Validation Error', 'Email address is already linked to another account.');
         return;
       }
-
-      const qPhone = query(usersRef, where('phoneNumber', '==', formattedPhone));
-      const phoneSnapshot = await getDocs(qPhone);
-      if (!phoneSnapshot.empty) {
+      if (phoneTaken) {
         setLoading(false);
         showAlert('Validation Error', 'Phone number is already linked to another account.');
         return;
       }
-
-      const isMasterCode = MASTER_REFERRAL_CODES.includes(cleanRefCode);
-      if (!isMasterCode) {
-        const qRef = query(usersRef, where('referral', '==', cleanRefCode));
-        const refSnapshot = await getDocs(qRef);
-
-        if (refSnapshot.empty) {
-          setLoading(false);
-          showAlert('Invalid Referral', 'The referral code entered does not exist in our records.');
-          return;
-        } else {
-          referrerUid = refSnapshot.docs[0].id;
-        }
+      if (!referralValid) {
+        setLoading(false);
+        showAlert('Invalid Referral', 'The referral code entered does not exist in our records.');
+        return;
       }
 
       const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
@@ -373,8 +369,9 @@ export default function RegisterScreen({ navigation, route }) {
       // set here. Firestore security rules forbid the client from creating
       // its own document with a 'balance' field present — only the server
       // (Cloud Functions, via the Admin SDK) is allowed to write balance,
-      // taskCount, earnings, etc. Every part of the app already treats a
-      // missing balance field as 0, so this has no functional effect.
+      // taskCount, earnings, walletAddress, etc. Every part of the app
+      // already treats a missing balance field as 0, so this has no
+      // functional effect.
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         username: cleanUsername,

@@ -17,8 +17,11 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { auth, db } from '../firebaseConfig';
-import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
+
+const functionsInstance = getFunctions();
 
 export default function SettlementConfigScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
@@ -86,27 +89,6 @@ export default function SettlementConfigScreen({ navigation }) {
       if (filteredText.length <= 42) {
         setWalletAddress(filteredText);
       }
-    }
-  };
-
-  const checkWalletUniqueness = async (address) => {
-    try {
-      const q = query(collection(db, 'users'), where('walletAddress', '==', address));
-      const querySnapshot = await getDocs(q);
-      
-      const currentUserUid = auth.currentUser?.uid;
-      let isDuplicate = false;
-
-      querySnapshot.forEach((docSnap) => {
-        if (docSnap.id !== currentUserUid) {
-          isDuplicate = true;
-        }
-      });
-
-      return !isDuplicate;
-    } catch (error) {
-      console.log("Error checking wallet uniqueness:", error);
-      return true;
     }
   };
 
@@ -183,13 +165,6 @@ export default function SettlementConfigScreen({ navigation }) {
 
     setLoading(true);
 
-    const isUnique = await checkWalletUniqueness(trimmedAddress);
-    if (!isUnique) {
-      setLoading(false);
-      Alert.alert('Address Already In Use', 'This wallet address is already linked with another user account.');
-      return;
-    }
-
     const isVerified = await verifyDeviceSecurity();
     if (!isVerified) {
       setLoading(false);
@@ -198,13 +173,12 @@ export default function SettlementConfigScreen({ navigation }) {
     }
 
     try {
-      const user = auth.currentUser;
-      if (user) {
-        await updateDoc(doc(db, 'users', user.uid), {
-          walletAddress: trimmedAddress,
-          walletNetwork: network
-        });
-      }
+      // The uniqueness check (no two accounts sharing the same wallet) and
+      // the actual write both happen server-side, atomically — the client
+      // can no longer write walletAddress directly (blocked by Firestore
+      // security rules).
+      const updateWallet = httpsCallable(functionsInstance, 'updateWalletAddress');
+      await updateWallet({ walletAddress: trimmedAddress, network: network });
 
       setIsWalletSaved(true);
       setIsEditable(false);
@@ -224,7 +198,10 @@ export default function SettlementConfigScreen({ navigation }) {
         ]
       );
     } catch (err) {
-      Alert.alert('Database Error', err.message || 'Failed to update wallet address.');
+      const message = err.code === 'functions/already-exists'
+        ? 'This wallet address is already linked with another user account.'
+        : (err.message || 'Failed to update wallet address.');
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }

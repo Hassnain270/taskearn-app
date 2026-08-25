@@ -8,32 +8,39 @@ service cloud.firestore {
     // Client (app) is allowed to read its own document and update
     // only "safe" profile-type fields. Money fields (balance,
     // taskCount, todayEarnings, totalEarnings, tronAddress,
-    // walletIndex, vip status) can ONLY be written by the Admin SDK
-    // (Cloud Functions), never directly by the client.
+    // walletIndex, vip status) AND walletAddress/walletNetwork can
+    // ONLY be written by the Admin SDK (Cloud Functions), never
+    // directly by the client. Any cross-user lookup (login by
+    // username, registration uniqueness checks, wallet uniqueness)
+    // is handled by dedicated Cloud Functions instead of direct
+    // client queries, since those must run BEFORE the user is
+    // authenticated or need to see OTHER users' data.
     // ---------------------------------------------------------------
     match /users/{userId} {
 
       allow read: if request.auth != null && request.auth.uid == userId;
 
       // Registration: user may create their own doc once, but cannot
-      // set balance/taskCount/earnings themselves at signup.
+      // set balance/taskCount/earnings/wallet fields themselves at signup.
       allow create: if request.auth != null
                     && request.auth.uid == userId
                     && !('balance' in request.resource.data)
                     && !('taskCount' in request.resource.data)
                     && !('todayEarnings' in request.resource.data)
                     && !('totalEarnings' in request.resource.data)
-                    && !('tronAddress' in request.resource.data);
+                    && !('tronAddress' in request.resource.data)
+                    && !('walletAddress' in request.resource.data);
 
-      // Profile-only updates: wallet payout address, phone, email,
-      // referral display fields. Every money/limit field below must
-      // stay UNCHANGED compared to the existing document.
+      // Profile-only updates: contact/display info. walletAddress is
+      // deliberately NOT in this list — it can only be changed via the
+      // updateWalletAddress Cloud Function, which also enforces the
+      // "no duplicate wallet across accounts" rule server-side.
       allow update: if request.auth != null
                     && request.auth.uid == userId
                     && request.resource.data.diff(resource.data).affectedKeys()
                          .hasOnly([
-                           'walletAddress', 'trc20Address',
-                           'phone', 'email', 'displayName'
+                           'phone', 'email', 'displayName',
+                           'fullName', 'gender', 'dobText'
                          ]);
 
       // No client-side delete of user docs.
