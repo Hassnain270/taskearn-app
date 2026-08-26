@@ -637,8 +637,6 @@ exports.updateWithdrawalStatus = onCall(
           confirmedTxHash: confirmedTxHash,
         });
 
-        // Home screen's "TOTAL WITHDRAW" figure — accumulates every
-        // successfully completed withdrawal's gross amount.
         transaction.update(payoutUserRef, {
           totalWithdraw: admin.firestore.FieldValue.increment(Number(withdrawalData.amount || 0)),
         });
@@ -804,6 +802,31 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const activeTier = getVipTierByBalance(finalUserBalance);
     const baseVipCapital = activeTier ? activeTier.minCapital : 0;
 
+    // Pre-fetch the entire referral chain BEFORE any writes — Firestore
+    // transactions require every read to happen before any write. The
+    // previous version read level1/level2 docs AFTER writes had already
+    // started, which caused every VIP-tier deposit with a referral chain
+    // to fail repeatedly (retried every scheduler run, never succeeding).
+    let level1Ref = null, level1Doc = null, level1Data = null;
+    let level2Ref = null, level2Doc = null, level2Data = null;
+
+    if (baseVipCapital > 0 && userData.referredBy) {
+      level1Ref = db.collection("users").doc(userData.referredBy);
+      level1Doc = await transaction.get(level1Ref);
+      if (level1Doc.exists) {
+        level1Data = level1Doc.data();
+        if (level1Data.referredBy) {
+          level2Ref = db.collection("users").doc(level1Data.referredBy);
+          level2Doc = await transaction.get(level2Ref);
+          if (level2Doc.exists) {
+            level2Data = level2Doc.data();
+          }
+        }
+      }
+    }
+
+    // ---- All writes happen below this line ----
+
     transaction.update(userRef, {
       balance: finalUserBalance,
       totalBalance: finalUserBalance,
@@ -841,67 +864,53 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       });
     }
 
-    if (baseVipCapital > 0 && userData.referredBy) {
-      const level1Ref = db.collection("users").doc(userData.referredBy);
-      const level1Doc = await transaction.get(level1Ref);
+    if (level1Doc && level1Doc.exists) {
+      const directBonus = Number((baseVipCapital * 0.10).toFixed(2));
+      const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
 
-      if (level1Doc.exists) {
-        const level1Data = level1Doc.data();
-        const directBonus = Number((baseVipCapital * 0.10).toFixed(2));
-        const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
+      transaction.update(level1Ref, {
+        balance: level1NewBalance,
+        totalBalance: level1NewBalance,
+        totalEarnings: admin.firestore.FieldValue.increment(directBonus),
+        teamReward: admin.firestore.FieldValue.increment(directBonus),
+      });
 
-        // Direct referral bonus counts toward: current balance, lifetime
-        // total earnings, AND the Home screen's "TEAM REWARD" figure.
-        transaction.update(level1Ref, {
-          balance: level1NewBalance,
-          totalBalance: level1NewBalance,
-          totalEarnings: admin.firestore.FieldValue.increment(directBonus),
-          teamReward: admin.firestore.FieldValue.increment(directBonus),
+      const directBonusTxRef = db.collection("transactions").doc();
+      transaction.set(directBonusTxRef, {
+        transactionId: directBonusTxRef.id,
+        userId: userData.referredBy,
+        type: "DIRECT_REFERRAL_BONUS",
+        amount: directBonus,
+        fromUserId: userId,
+        status: "approved",
+        title: "Direct Referral Bonus (10%)",
+        baseCapital: baseVipCapital,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      if (level2Doc && level2Doc.exists) {
+        const indirectBonus = Number((baseVipCapital * 0.05).toFixed(2));
+        const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
+
+        transaction.update(level2Ref, {
+          balance: level2NewBalance,
+          totalBalance: level2NewBalance,
+          totalEarnings: admin.firestore.FieldValue.increment(indirectBonus),
+          teamReward: admin.firestore.FieldValue.increment(indirectBonus),
         });
 
-        const directBonusTxRef = db.collection("transactions").doc();
-        transaction.set(directBonusTxRef, {
-          transactionId: directBonusTxRef.id,
-          userId: userData.referredBy,
-          type: "DIRECT_REFERRAL_BONUS",
-          amount: directBonus,
+        const indirectBonusTxRef = db.collection("transactions").doc();
+        transaction.set(indirectBonusTxRef, {
+          transactionId: indirectBonusTxRef.id,
+          userId: level1Data.referredBy,
+          type: "INDIRECT_REFERRAL_BONUS",
+          amount: indirectBonus,
           fromUserId: userId,
           status: "approved",
-          title: "Direct Referral Bonus (10%)",
+          title: "Indirect Referral Bonus (5%)",
           baseCapital: baseVipCapital,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-
-        if (level1Data.referredBy) {
-          const level2Ref = db.collection("users").doc(level1Data.referredBy);
-          const level2Doc = await transaction.get(level2Ref);
-
-          if (level2Doc.exists) {
-            const level2Data = level2Doc.data();
-            const indirectBonus = Number((baseVipCapital * 0.05).toFixed(2));
-            const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
-
-            transaction.update(level2Ref, {
-              balance: level2NewBalance,
-              totalBalance: level2NewBalance,
-              totalEarnings: admin.firestore.FieldValue.increment(indirectBonus),
-              teamReward: admin.firestore.FieldValue.increment(indirectBonus),
-            });
-
-            const indirectBonusTxRef = db.collection("transactions").doc();
-            transaction.set(indirectBonusTxRef, {
-              transactionId: indirectBonusTxRef.id,
-              userId: level1Data.referredBy,
-              type: "INDIRECT_REFERRAL_BONUS",
-              amount: indirectBonus,
-              fromUserId: userId,
-              status: "approved",
-              title: "Indirect Referral Bonus (5%)",
-              baseCapital: baseVipCapital,
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-          }
-        }
       }
     }
   });
