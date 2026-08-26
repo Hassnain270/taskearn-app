@@ -12,7 +12,8 @@ import {
   Modal,
   Platform,
   Image,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
+  ScrollView
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
@@ -104,6 +105,15 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // Same constraint as the Registration screen's username field: no spaces,
+  // maximum 12 characters.
+  const handleUsernameChange = (text) => {
+    const noSpaces = text.replace(/\s/g, '');
+    if (noSpaces.length <= 12) {
+      setUsername(noSpaces);
+    }
+  };
+
   const handleLogin = async () => {
     const inputIdentifier = username.trim();
     const cleanPassword = password.trim();
@@ -150,8 +160,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // Forgot password is email-OTP only — phone/SMS OTP was never activated
-  // on the backend, so there's no second channel to choose between.
   const handleGetOTP = async () => {
     const cleanUsername = recoverUsername.trim();
     if (!cleanUsername || cleanUsername.length < 5) {
@@ -261,81 +269,90 @@ export default function LoginScreen({ navigation }) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      <View style={styles.content}>
-        <View style={styles.logoContainer}>
-          <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
-          <Text style={styles.logoText}>TaskEarn</Text>
-          <Text style={styles.subtitleText}>Secure Task & Financial Platform</Text>
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Username</Text>
-          <View style={styles.inputWrapper}>
-            <MaterialCommunityIcons name="account-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your username"
-              placeholderTextColor="#94A3B8"
-              value={username}
-              onChangeText={(text) => setUsername(text)}
-              maxLength={40}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.logoContainer}>
+            <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
+            <Text style={styles.logoText}>TaskEarn</Text>
+            <Text style={styles.subtitleText}>Secure Task & Financial Platform</Text>
           </View>
-        </View>
 
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Password</Text>
-          <View style={styles.inputWrapper}>
-            <MaterialCommunityIcons name="lock-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your password"
-              placeholderTextColor="#94A3B8"
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={(text) => setPassword(text)}
-              maxLength={20}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-              <MaterialCommunityIcons
-                name={showPassword ? "eye-outline" : "eye-off-outline"}
-                size={20}
-                color="#94A3B8"
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Username</Text>
+            <View style={styles.inputWrapper}>
+              <MaterialCommunityIcons name="account-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your username"
+                placeholderTextColor="#94A3B8"
+                value={username}
+                onChangeText={handleUsernameChange}
+                maxLength={12}
+                autoCapitalize="none"
+                autoCorrect={false}
               />
+            </View>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Password</Text>
+            <View style={styles.inputWrapper}>
+              <MaterialCommunityIcons name="lock-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your password"
+                placeholderTextColor="#94A3B8"
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={(text) => setPassword(text)}
+                maxLength={20}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+                <MaterialCommunityIcons
+                  name={showPassword ? "eye-outline" : "eye-off-outline"}
+                  size={20}
+                  color="#94A3B8"
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.forgetContainer}
+            onPress={() => setForgetModalVisible(true)}
+          >
+            <Text style={styles.forgetText}>Forgot Password?</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.loginBtn, isLoading && styles.disabledBtn]}
+            onPress={handleLogin}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.loginBtnText}>Login</Text>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.footerRow}>
+            <Text style={styles.footerText}>Don't have an account? </Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+              <Text style={styles.registerLink}>Register Now</Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.forgetContainer}
-          onPress={() => setForgetModalVisible(true)}
-        >
-          <Text style={styles.forgetText}>Forgot Password?</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.loginBtn, isLoading && styles.disabledBtn]}
-          onPress={handleLogin}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.loginBtnText}>Login</Text>
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.footerRow}>
-          <Text style={styles.footerText}>Don't have an account? </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-            <Text style={styles.registerLink}>Register Now</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <Modal
         animationType="fade"
@@ -361,8 +378,8 @@ export default function LoginScreen({ navigation }) {
                       placeholder="Username"
                       placeholderTextColor="#94A3B8"
                       value={recoverUsername}
-                      onChangeText={(text) => setRecoverUsername(text)}
-                      maxLength={20}
+                      onChangeText={(text) => setRecoverUsername(text.replace(/\s/g, ''))}
+                      maxLength={12}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
@@ -479,7 +496,7 @@ export default function LoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  content: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
+  content: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 24 },
   logoContainer: { alignItems: 'center', marginBottom: 40 },
   logoImage: { width: 80, height: 80, borderRadius: 18 },
   logoText: { fontSize: 28, fontWeight: 'bold', color: '#1E293B', marginTop: 10 },
