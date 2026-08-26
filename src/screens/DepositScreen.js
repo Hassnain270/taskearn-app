@@ -12,6 +12,7 @@ import {
   Platform
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -127,15 +128,20 @@ export default function DepositScreen({ navigation }) {
     }
   };
 
-  const copyToClipboard = () => {
-    if (depositAddress) {
-      if (Platform.OS === 'web' && navigator.clipboard) {
-        navigator.clipboard.writeText(depositAddress);
-        Alert.alert("Copied", `${selectedNetwork} address successfully copied to clipboard.`);
-      } else {
-        Alert.alert("Copied", depositAddress);
-      }
+  // On web, navigator.clipboard.writeText already copies correctly. On
+  // native (Android/iOS), the old code just showed an Alert with the
+  // address text but never actually wrote anything to the clipboard —
+  // expo-clipboard's setStringAsync is required to actually copy there.
+  const copyToClipboard = async () => {
+    if (!depositAddress) return;
+
+    if (Platform.OS === 'web' && navigator.clipboard) {
+      navigator.clipboard.writeText(depositAddress);
+    } else {
+      await Clipboard.setStringAsync(depositAddress);
     }
+
+    Alert.alert("Copied", `${selectedNetwork} address successfully copied to clipboard.`);
   };
 
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
