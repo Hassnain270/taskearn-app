@@ -14,7 +14,8 @@ import {
   ActivityIndicator,
   Linking,
   Platform,
-  Image
+  Image,
+  KeyboardAvoidingView
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
@@ -326,9 +327,6 @@ export default function RegisterScreen({ navigation, route }) {
     const cleanEmail = email.trim().toLowerCase();
 
     try {
-      // A single server-side call checks username/email/phone availability
-      // and referral code validity all at once — the client is not
-      // permitted to query other users' Firestore documents directly.
       const checkAvailability = httpsCallable(functionsInstance, 'checkRegistrationAvailability');
       const availabilityRes = await checkAvailability({
         username: cleanUsername,
@@ -365,13 +363,6 @@ export default function RegisterScreen({ navigation, route }) {
 
       const myNewReferralCode = generateReferralCode();
 
-      // NOTE: 'balance' (and other money/limit fields) are deliberately NOT
-      // set here. Firestore security rules forbid the client from creating
-      // its own document with a 'balance' field present — only the server
-      // (Cloud Functions, via the Admin SDK) is allowed to write balance,
-      // taskCount, earnings, walletAddress, etc. Every part of the app
-      // already treats a missing balance field as 0, so this has no
-      // functional effect.
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         username: cleanUsername,
@@ -408,175 +399,181 @@ export default function RegisterScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        
-        <View style={styles.centerContainer}>
-          <View style={styles.headerContainer}>
-            <TouchableOpacity 
-              style={styles.backButton} 
-              onPress={() => navigation?.goBack()}
-            >
-              <Feather name="arrow-left" size={24} color="#fff" />
-            </TouchableOpacity>
-            <View style={styles.logoContainer}>
-              <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
-            </View>
-            <Text style={styles.titleText}>Create Account</Text>
-            <Text style={styles.subtitleText}>Join TaskEarn and start earning today</Text>
-          </View>
 
-          <View style={styles.formContainer}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
 
-            <Text style={styles.label}>Full Name</Text>
-            <View style={styles.inputWrapper}>
-              <Feather name="user" size={18} color="#94a3b8" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="John Doe"
-                placeholderTextColor="#64748b"
-                value={fullName}
-                onChangeText={setFullName}
-                autoCapitalize="words"
-              />
-            </View>
-
-            <Text style={styles.label}>Username</Text>
-            <View style={styles.inputWrapper}>
-              <Feather name="at-sign" size={18} color="#94a3b8" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="johndoe123"
-                placeholderTextColor="#64748b"
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-                maxLength={12}
-              />
-            </View>
-
-            <Text style={styles.label}>Email Address</Text>
-            <View style={styles.inputWrapper}>
-              <Feather name="mail" size={18} color="#94a3b8" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="name@example.com"
-                placeholderTextColor="#64748b"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-
-            <Text style={styles.label}>Phone Number</Text>
-            <View style={styles.phoneInputRow}>
+          <View style={styles.centerContainer}>
+            <View style={styles.headerContainer}>
               <TouchableOpacity 
-                style={styles.countryPickerButton} 
-                onPress={() => setCountryModalVisible(true)}
+                style={styles.backButton} 
+                onPress={() => navigation?.goBack()}
               >
-                <Text style={styles.flagText}>{selectedCountry.flag}</Text>
-                <Text style={styles.dialCodeText}>{selectedCountry.dial_code}</Text>
-                <Feather name="chevron-down" size={14} color="#94a3b8" />
+                <Feather name="arrow-left" size={24} color="#fff" />
               </TouchableOpacity>
+              <View style={styles.logoContainer}>
+                <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
+              </View>
+              <Text style={styles.titleText}>Create Account</Text>
+              <Text style={styles.subtitleText}>Join TaskEarn and start earning today</Text>
+            </View>
 
-              <View style={[styles.inputWrapper, { flex: 1, marginBottom: 0 }]}>
+            <View style={styles.formContainer}>
+
+              <Text style={styles.label}>Full Name</Text>
+              <View style={styles.inputWrapper}>
+                <Feather name="user" size={18} color="#94a3b8" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder={`Phone number`}
+                  placeholder="John Doe"
                   placeholderTextColor="#64748b"
-                  value={phoneNumber}
-                  onChangeText={(text) => setPhoneNumber(text.replace(/[^0-9]/g, ''))}
-                  keyboardType="phone-pad"
-                  maxLength={selectedCountry.maxLen}
+                  value={fullName}
+                  onChangeText={setFullName}
+                  autoCapitalize="words"
                 />
               </View>
-            </View>
 
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.inputWrapper}>
-              <Feather name="lock" size={18} color="#94a3b8" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="••••••••"
-                placeholderTextColor="#64748b"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                maxLength={12}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-                <Feather name={showPassword ? "eye" : "eye-off"} size={18} color="#94a3b8" />
+              <Text style={styles.label}>Username</Text>
+              <View style={styles.inputWrapper}>
+                <Feather name="at-sign" size={18} color="#94a3b8" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="johndoe123"
+                  placeholderTextColor="#64748b"
+                  value={username}
+                  onChangeText={setUsername}
+                  autoCapitalize="none"
+                  maxLength={12}
+                />
+              </View>
+
+              <Text style={styles.label}>Email Address</Text>
+              <View style={styles.inputWrapper}>
+                <Feather name="mail" size={18} color="#94a3b8" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="name@example.com"
+                  placeholderTextColor="#64748b"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <Text style={styles.label}>Phone Number</Text>
+              <View style={styles.phoneInputRow}>
+                <TouchableOpacity 
+                  style={styles.countryPickerButton} 
+                  onPress={() => setCountryModalVisible(true)}
+                >
+                  <Text style={styles.flagText}>{selectedCountry.flag}</Text>
+                  <Text style={styles.dialCodeText}>{selectedCountry.dial_code}</Text>
+                  <Feather name="chevron-down" size={14} color="#94a3b8" />
+                </TouchableOpacity>
+
+                <View style={[styles.inputWrapper, { flex: 1, marginBottom: 0 }]}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder={`Phone number`}
+                    placeholderTextColor="#64748b"
+                    value={phoneNumber}
+                    onChangeText={(text) => setPhoneNumber(text.replace(/[^0-9]/g, ''))}
+                    keyboardType="phone-pad"
+                    maxLength={selectedCountry.maxLen}
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.label}>Password</Text>
+              <View style={styles.inputWrapper}>
+                <Feather name="lock" size={18} color="#94a3b8" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="••••••••"
+                  placeholderTextColor="#64748b"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  maxLength={12}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+                  <Feather name={showPassword ? "eye" : "eye-off"} size={18} color="#94a3b8" />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>Confirm Password</Text>
+              <View style={styles.inputWrapper}>
+                <Feather name="shield" size={18} color="#94a3b8" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="••••••••"
+                  placeholderTextColor="#64748b"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showConfirmPassword}
+                  maxLength={12}
+                />
+                <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeIcon}>
+                  <Feather name={showConfirmPassword ? "eye" : "eye-off"} size={18} color="#94a3b8" />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>Referral Code</Text>
+              <View style={styles.inputWrapper}>
+                <FontAwesome5 name="ticket-alt" size={16} color="#94a3b8" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter referral code"
+                  placeholderTextColor="#64748b"
+                  value={referralCode}
+                  onChangeText={setReferralCode}
+                  autoCapitalize="characters"
+                  maxLength={6}
+                />
+              </View>
+
+              <TouchableOpacity 
+                style={styles.termsRow} 
+                onPress={() => setTermsAccepted(!termsAccepted)}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons 
+                  name={termsAccepted ? "checkbox-marked" : "checkbox-blank-outline"} 
+                  size={22} 
+                  color={termsAccepted ? "#2563eb" : "#64748b"} 
+                />
+                <Text style={styles.termsText}>
+                  I agree to the <Text style={styles.termsLink}>Terms of Service</Text> and <Text style={styles.termsLink}>Privacy Policy</Text>
+                </Text>
               </TouchableOpacity>
-            </View>
 
-            <Text style={styles.label}>Confirm Password</Text>
-            <View style={styles.inputWrapper}>
-              <Feather name="shield" size={18} color="#94a3b8" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="••••••••"
-                placeholderTextColor="#64748b"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showConfirmPassword}
-                maxLength={12}
-              />
-              <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeIcon}>
-                <Feather name={showConfirmPassword ? "eye" : "eye-off"} size={18} color="#94a3b8" />
+              <TouchableOpacity 
+                style={[styles.registerButton, loading && styles.disabledButton]} 
+                onPress={handleRegister}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.registerButtonText}>Register</Text>
+                )}
               </TouchableOpacity>
+
+              <View style={styles.loginRow}>
+                <Text style={styles.loginText}>Already have an account? </Text>
+                <TouchableOpacity onPress={() => navigation?.navigate('Login')}>
+                  <Text style={styles.loginLink}>Login</Text>
+                </TouchableOpacity>
+              </View>
+
             </View>
-
-            <Text style={styles.label}>Referral Code</Text>
-            <View style={styles.inputWrapper}>
-              <FontAwesome5 name="ticket-alt" size={16} color="#94a3b8" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter referral code"
-                placeholderTextColor="#64748b"
-                value={referralCode}
-                onChangeText={setReferralCode}
-                autoCapitalize="characters"
-                maxLength={6}
-              />
-            </View>
-
-            <TouchableOpacity 
-              style={styles.termsRow} 
-              onPress={() => setTermsAccepted(!termsAccepted)}
-              activeOpacity={0.8}
-            >
-              <MaterialCommunityIcons 
-                name={termsAccepted ? "checkbox-marked" : "checkbox-blank-outline"} 
-                size={22} 
-                color={termsAccepted ? "#2563eb" : "#64748b"} 
-              />
-              <Text style={styles.termsText}>
-                I agree to the <Text style={styles.termsLink}>Terms of Service</Text> and <Text style={styles.termsLink}>Privacy Policy</Text>
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.registerButton, loading && styles.disabledButton]} 
-              onPress={handleRegister}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.registerButtonText}>Register</Text>
-              )}
-            </TouchableOpacity>
-
-            <View style={styles.loginRow}>
-              <Text style={styles.loginText}>Already have an account? </Text>
-              <TouchableOpacity onPress={() => navigation?.navigate('Login')}>
-                <Text style={styles.loginLink}>Login</Text>
-              </TouchableOpacity>
-            </View>
-
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <Modal visible={countryModalVisible} animationType="slide" transparent={true}>
         <SafeAreaView style={styles.modalOverlay}>
