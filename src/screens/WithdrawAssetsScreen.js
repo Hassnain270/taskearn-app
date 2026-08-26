@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,11 @@ import {
   Platform,
   ScrollView,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -57,6 +57,18 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // OTP verification now gates the actual withdrawal submission — this
+  // replaces the old passkey/biometric check entirely, since password-only
+  // login could otherwise let an attacker with a stolen password drain
+  // funds. The code goes to the account's current, already-verified email.
+  const [otpModalVisible, setOtpModalVisible] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpTimer, setOtpTimer] = useState(60);
+  const [canResendOtp, setCanResendOtp] = useState(false);
+  const otpIntervalRef = useRef(null);
+
   useEffect(() => {
     const currentUser = auth.currentUser;
     if (currentUser) {
@@ -78,6 +90,30 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
       return () => unsubscribe();
     }
   }, []);
+
+  useEffect(() => {
+    return () => stopOtpTimer();
+  }, []);
+
+  const startOtpTimer = () => {
+    stopOtpTimer();
+    setOtpTimer(60);
+    setCanResendOtp(false);
+    otpIntervalRef.current = setInterval(() => {
+      setOtpTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(otpIntervalRef.current);
+          setCanResendOtp(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const stopOtpTimer = () => {
+    if (otpIntervalRef.current) clearInterval(otpIntervalRef.current);
+  };
 
   const vipLockedCapital = calculateVipLockedCapital(incomingBalance);
   const withdrawableBalance = incomingBalance > vipLockedCapital ? parseFloat((incomingBalance - vipLockedCapital).toFixed(2)) : 0.00;
@@ -105,6 +141,10 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
         netPayout: finalPayout,
         walletAddress: walletAddress
       });
+
+      setOtpModalVisible(false);
+      stopOtpTimer();
+      setOtpCode('');
 
       Alert.alert(
         "Payout Request Received",
@@ -145,37 +185,62 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
       return;
     }
 
-    // Passkey/biometric hardware doesn't exist in a browser — go straight
-    // to submitting the request on web, exactly like Login/Settlement/
-    // Security already do.
-    if (Platform.OS === 'web') {
-      await executeWithdrawal();
+    await sendWithdrawOtp();
+  };
+
+  const sendWithdrawOtp = async () => {
+    setOtpSending(true);
+    try {
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'WITHDRAWAL' });
+      setOtpCode('');
+      setOtpModalVisible(true);
+      startOtpTimer();
+    } catch (err) {
+      Alert.alert("Error", err.message || "Failed to send verification code.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleResendWithdrawOtp = async () => {
+    if (!canResendOtp) return;
+    setOtpSending(true);
+    try {
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'WITHDRAWAL' });
+      startOtpTimer();
+      Alert.alert("Code Resent", "A new verification code has been sent to your registered email.");
+    } catch (err) {
+      Alert.alert("Error", err.message || "Failed to resend the code.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleVerifyWithdrawOtp = async () => {
+    if (otpCode.length !== 6) {
+      Alert.alert("Invalid Code", "Please enter the 6-digit code sent to your email.");
       return;
     }
 
+    setOtpVerifying(true);
     try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
+      await verifyOtp({ email: auth.currentUser?.email, code: otpCode, purpose: 'WITHDRAWAL' });
 
-      if (hasHardware && isEnrolled) {
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: 'Confirm Passkey / Screen Lock to authorize withdrawal',
-          fallbackLabel: 'Use Device PIN',
-          cancelLabel: 'Cancel',
-          disableDeviceFallback: false,
-        });
-
-        if (result.success) {
-          await executeWithdrawal();
-        } else {
-          Alert.alert("Authentication Failed", "Security passkey verification was not completed.");
-        }
-      } else {
-        await executeWithdrawal();
-      }
-    } catch (error) {
-      Alert.alert("Passkey Error", "Unable to verify screen lock authentication. " + error.message);
+      await executeWithdrawal();
+    } catch (err) {
+      Alert.alert("Verification Failed", err.message || "The code entered is invalid or has expired.");
+    } finally {
+      setOtpVerifying(false);
     }
+  };
+
+  const handleOtpCancel = () => {
+    setOtpModalVisible(false);
+    setOtpCode('');
+    stopOtpTimer();
   };
 
   const handleWalletBoxPress = () => {
@@ -327,15 +392,56 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
         <TouchableOpacity
           style={[styles.actionButton, isButtonEnabled ? styles.activeButtonColor : currentStyles.disabledButtonColor]}
           onPress={handleWithdrawInitiate}
-          disabled={!isButtonEnabled || loading}
+          disabled={!isButtonEnabled || loading || otpSending}
         >
-          {loading ? (
+          {(loading || otpSending) ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.actionButtonText}>Confirm Payout Request</Text>
           )}
         </TouchableOpacity>
       </View>
+
+      <Modal visible={otpModalVisible} transparent animationType="fade" onRequestClose={handleOtpCancel}>
+        <View style={styles.modalOverlay}>
+          <View style={currentStyles.otpModalCard}>
+            <Text style={currentStyles.otpModalTitle}>Verify Your Identity</Text>
+            <Text style={styles.otpModalSubtitle}>
+              We sent a 6-digit code to {auth.currentUser?.email}. Enter it below to confirm this withdrawal request.
+            </Text>
+            <TextInput
+              style={currentStyles.otpModalInput}
+              placeholder="Enter 6-digit code"
+              placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+              keyboardType="number-pad"
+              maxLength={6}
+              value={otpCode}
+              onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
+            />
+            <View style={styles.otpTimerRow}>
+              {canResendOtp ? (
+                <TouchableOpacity onPress={handleResendWithdrawOtp} disabled={otpSending}>
+                  <Text style={styles.resendActiveText}>Resend Code</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
+              )}
+            </View>
+            <View style={styles.otpModalActions}>
+              <TouchableOpacity style={styles.otpCancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
+                <Text style={styles.otpCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.otpConfirmBtn} onPress={handleVerifyWithdrawOtp} disabled={otpVerifying}>
+                {otpVerifying ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.otpConfirmText}>Verify OTP</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -358,7 +464,10 @@ const lightStyles = StyleSheet.create({
   termsBox: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, marginTop: 10, borderWidth: 1, borderColor: '#E2E8F0' },
   termsTitle: { fontSize: 11, fontWeight: '700', color: '#1E293B', letterSpacing: 0.5 },
   footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
-  disabledButtonColor: { backgroundColor: '#CBD5E1' }
+  disabledButtonColor: { backgroundColor: '#CBD5E1' },
+  otpModalCard: { width: '88%', backgroundColor: '#FFFFFF', borderRadius: 18, padding: 20 },
+  otpModalTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
+  otpModalInput: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, color: '#1E293B', fontSize: 16, fontWeight: '700', marginTop: 14, textAlign: 'center', letterSpacing: 4 }
 });
 
 const darkStyles = StyleSheet.create({
@@ -378,7 +487,10 @@ const darkStyles = StyleSheet.create({
   termsBox: { backgroundColor: '#161B22', borderRadius: 16, padding: 18, marginTop: 10, borderWidth: 1, borderColor: '#21262D' },
   termsTitle: { fontSize: 11, fontWeight: '700', color: '#E2E8F0', letterSpacing: 0.5 },
   footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#21262D' },
-  disabledButtonColor: { backgroundColor: '#21262D' }
+  disabledButtonColor: { backgroundColor: '#21262D' },
+  otpModalCard: { width: '88%', backgroundColor: '#161B22', borderRadius: 18, padding: 20 },
+  otpModalTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginBottom: 6 },
+  otpModalInput: { backgroundColor: '#0D1117', borderRadius: 10, borderWidth: 1, borderColor: '#21262D', padding: 12, color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginTop: 14, textAlign: 'center', letterSpacing: 4 }
 });
 
 const styles = StyleSheet.create({
@@ -401,5 +513,15 @@ const styles = StyleSheet.create({
   bulletText: { flex: 1, fontSize: 11, color: '#94A3B8', lineHeight: 16, fontWeight: '500', textAlign: 'justify' },
   actionButton: { height: 54, borderRadius: 16, justifyContent: 'center', alignItems: 'center', width: '100%' },
   activeButtonColor: { backgroundColor: '#2563EB' },
-  actionButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' }
+  actionButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  otpModalSubtitle: { fontSize: 12, color: '#94A3B8', fontWeight: '500', lineHeight: 17 },
+  otpTimerRow: { alignItems: 'center', marginTop: 14, marginBottom: 6 },
+  resendActiveText: { color: '#3B82F6', fontSize: 13, fontWeight: '700' },
+  resendDisabledText: { color: '#94A3B8', fontSize: 13, fontWeight: '500' },
+  otpModalActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  otpCancelBtn: { flex: 1, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(148,163,184,0.15)' },
+  otpCancelText: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
+  otpConfirmBtn: { flex: 1, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#2563EB' },
+  otpConfirmText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' }
 });
