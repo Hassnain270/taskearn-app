@@ -10,12 +10,14 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { ThemeContext } from '../../ThemeContext';
 
 export default function VipScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
   const [totalBalance, setTotalBalance] = useState(route?.params?.totalBalance || 0.00);
   const [loading, setLoading] = useState(true);
 
@@ -134,11 +136,6 @@ export default function VipScreen({ navigation, route }) {
               </View>
             );
           } else if (isPreviousVip) {
-            // Tiers the user has already passed through — cannot be
-            // re-unlocked (VIP progress only moves forward), so this is
-            // purely informational. No lock icon or red color (which
-            // implies action is needed) and it's a plain View, not
-            // pressable, so tapping does nothing.
             renderStatusButton = (
               <View style={[styles.completedLabelBox, { backgroundColor: isDarkMode ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.15)' }]}>
                 <MaterialCommunityIcons name="check" size={14} color="#94A3B8" />
@@ -186,7 +183,7 @@ export default function VipScreen({ navigation, route }) {
         })}
       </ScrollView>
 
-      <View style={currentStyles.bottomTabNav}>
+      <View style={[currentStyles.bottomTabNav, { paddingBottom: 5 + insets.bottom, height: 65 + insets.bottom }]}>
         <TouchableOpacity style={styles.tabItem} onPress={handleHomeNavigation}>
           <MaterialCommunityIcons name="home" size={24} color="#94A3B8" />
           <Text style={styles.tabText}>HOME</Text>
@@ -227,7 +224,7 @@ const lightStyles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1E293B' },
   vipCard: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 14, alignItems: 'center', borderWidth: 1, borderColor: '#F1F5F9', elevation: 1.5 },
   profitValue: { fontSize: 16, fontWeight: 'bold', color: '#1E293B' },
-  bottomTabNav: { height: 65, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingBottom: 5 }
+  bottomTabNav: { backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0' }
 });
 
 const darkStyles = StyleSheet.create({
@@ -236,7 +233,7 @@ const darkStyles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
   vipCard: { flexDirection: 'row', backgroundColor: '#161B22', borderRadius: 20, padding: 16, marginBottom: 14, alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   profitValue: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
-  bottomTabNav: { height: 65, backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D', paddingBottom: 5 }
+  bottomTabNav: { backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D' }
 });
 
 const styles = StyleSheet.create({
