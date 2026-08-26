@@ -629,10 +629,18 @@ exports.updateWithdrawalStatus = onCall(
         const linkedTxSnap = await transaction.get(linkedTxQuery);
         const linkedTxRef = !linkedTxSnap.empty ? linkedTxSnap.docs[0].ref : null;
 
+        const payoutUserRef = db.collection("users").doc(withdrawalData.userId);
+
         transaction.update(withdrawalRef, {
           status: "completed",
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           confirmedTxHash: confirmedTxHash,
+        });
+
+        // Home screen's "TOTAL WITHDRAW" figure — accumulates every
+        // successfully completed withdrawal's gross amount.
+        transaction.update(payoutUserRef, {
+          totalWithdraw: admin.firestore.FieldValue.increment(Number(withdrawalData.amount || 0)),
         });
 
         if (linkedTxRef) {
@@ -842,9 +850,13 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
         const directBonus = Number((baseVipCapital * 0.10).toFixed(2));
         const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
 
+        // Direct referral bonus counts toward: current balance, lifetime
+        // total earnings, AND the Home screen's "TEAM REWARD" figure.
         transaction.update(level1Ref, {
           balance: level1NewBalance,
           totalBalance: level1NewBalance,
+          totalEarnings: admin.firestore.FieldValue.increment(directBonus),
+          teamReward: admin.firestore.FieldValue.increment(directBonus),
         });
 
         const directBonusTxRef = db.collection("transactions").doc();
@@ -872,6 +884,8 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
             transaction.update(level2Ref, {
               balance: level2NewBalance,
               totalBalance: level2NewBalance,
+              totalEarnings: admin.firestore.FieldValue.increment(indirectBonus),
+              teamReward: admin.firestore.FieldValue.increment(indirectBonus),
             });
 
             const indirectBonusTxRef = db.collection("transactions").doc();
@@ -1192,8 +1206,7 @@ exports.completeTask = onCall(async (request) => {
 });
 
 // ============================================
-// EMAIL OTP — now sent via Brevo's transactional email API instead of the
-// old Gmail-based Firestore "Trigger Email" extension.
+// EMAIL OTP — sent via Brevo's transactional email API.
 // ============================================
 
 exports.sendEmailOTP = onCall(
