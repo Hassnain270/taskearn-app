@@ -391,7 +391,7 @@ export default function RegisterScreen({ navigation, route }) {
       });
 
       setLoading(false);
-      navigation.replace('SetupPasskey', { uid: user.uid });
+      navigation.replace('Home');
       
     } catch (error) {
       setLoading(false);
