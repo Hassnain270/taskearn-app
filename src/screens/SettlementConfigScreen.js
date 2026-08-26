@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,11 @@ import {
   Platform,
   ScrollView,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -33,6 +33,18 @@ export default function SettlementConfigScreen({ navigation }) {
   const [isEditable, setIsEditable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+
+  // OTP verification gates the actual save (the real Cloud Function write) —
+  // unlocking an already-saved address for editing is harmless on its own
+  // since nothing is written until the OTP-verified save completes.
+  const [otpModalVisible, setOtpModalVisible] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpTimer, setOtpTimer] = useState(60);
+  const [canResendOtp, setCanResendOtp] = useState(false);
+  const otpIntervalRef = useRef(null);
+  const pendingSaveRef = useRef(null); // { address, network }
 
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
@@ -68,6 +80,30 @@ export default function SettlementConfigScreen({ navigation }) {
     fetchFirestoreWallet();
   }, []);
 
+  useEffect(() => {
+    return () => stopOtpTimer();
+  }, []);
+
+  const startOtpTimer = () => {
+    stopOtpTimer();
+    setOtpTimer(60);
+    setCanResendOtp(false);
+    otpIntervalRef.current = setInterval(() => {
+      setOtpTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(otpIntervalRef.current);
+          setCanResendOtp(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const stopOtpTimer = () => {
+    if (otpIntervalRef.current) clearInterval(otpIntervalRef.current);
+  };
+
   const validateAddress = (address, selectedNetwork) => {
     if (selectedNetwork === 'TRC20') {
       return /^T[a-zA-Z0-9]{33}$/.test(address);
@@ -92,49 +128,14 @@ export default function SettlementConfigScreen({ navigation }) {
     }
   };
 
-  // Passkey / biometric hardware simply doesn't exist in a browser — on
-  // web, we allow the action to proceed the same way LoginScreen and
-  // WithdrawAssetsScreen already do, instead of permanently blocking it.
-  const verifyDeviceSecurity = async () => {
-    if (Platform.OS === 'web') return true;
-
-    try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-
-      if (!hasHardware || !isEnrolled) {
-        Alert.alert(
-          "Passkey Required",
-          "Please enable screen lock or biometric security in your device settings to proceed with wallet authorization."
-        );
-        return false;
-      }
-
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Authenticate to authorize wallet address change",
-        fallbackLabel: "Use Screen Lock PIN",
-        cancelLabel: "Cancel",
-        disableDeviceFallback: false
-      });
-
-      return result.success;
-    } catch (authError) {
-      Alert.alert("Authentication Error", "Failed to verify device passkey.");
-      return false;
-    }
-  };
-
   const handleActionClick = async () => {
     const trimmedAddress = walletAddress.trim();
 
+    // Unlocking an already-saved address for editing — no write happens
+    // here, so no OTP needed at this step.
     if (isWalletSaved && !isEditable) {
-      const isVerified = await verifyDeviceSecurity();
-      if (isVerified) {
-        setIsEditable(true);
-        setIsWalletSaved(false);
-      } else {
-        Alert.alert("Authorization Failed", "Device authentication was not completed.");
-      }
+      setIsEditable(true);
+      setIsWalletSaved(false);
       return;
     }
 
@@ -168,28 +169,74 @@ export default function SettlementConfigScreen({ navigation }) {
       return;
     }
 
-    setLoading(true);
+    // Format is valid — now require OTP verification before the real save.
+    pendingSaveRef.current = { address: trimmedAddress, network };
+    await sendWalletOtp();
+  };
 
-    const isVerified = await verifyDeviceSecurity();
-    if (!isVerified) {
-      setLoading(false);
-      Alert.alert("Authorization Cancelled", "Action aborted due to unverified security check.");
+  const sendWalletOtp = async () => {
+    setOtpSending(true);
+    try {
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'WALLET_UPDATE' });
+      setOtpCode('');
+      setOtpModalVisible(true);
+      startOtpTimer();
+    } catch (err) {
+      Alert.alert('Error', err.message || 'Failed to send verification code.');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleResendWalletOtp = async () => {
+    if (!canResendOtp) return;
+    setOtpSending(true);
+    try {
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'WALLET_UPDATE' });
+      startOtpTimer();
+      Alert.alert('Code Resent', 'A new verification code has been sent to your registered email.');
+    } catch (err) {
+      Alert.alert('Error', err.message || 'Failed to resend the code.');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleVerifyWalletOtp = async () => {
+    if (otpCode.length !== 6) {
+      Alert.alert('Invalid Code', 'Please enter the 6-digit code sent to your email.');
+      return;
+    }
+    if (!pendingSaveRef.current) {
+      setOtpModalVisible(false);
       return;
     }
 
+    setOtpVerifying(true);
     try {
+      const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
+      await verifyOtp({ email: auth.currentUser?.email, code: otpCode, purpose: 'WALLET_UPDATE' });
+
+      const { address, network: pendingNetwork } = pendingSaveRef.current;
+
+      setLoading(true);
       const updateWallet = httpsCallable(functionsInstance, 'updateWalletAddress');
-      await updateWallet({ walletAddress: trimmedAddress, network: network });
+      await updateWallet({ walletAddress: address, network: pendingNetwork });
 
       setIsWalletSaved(true);
       setIsEditable(false);
+      setOtpModalVisible(false);
+      stopOtpTimer();
+      pendingSaveRef.current = null;
 
       Alert.alert(
         'Success',
-        `${network} Settlement Address saved successfully!`,
+        `${pendingNetwork} Settlement Address saved successfully!`,
         [
           {
-            text: "OK",
+            text: 'OK',
             onPress: () => {
               if (navigation && typeof navigation.goBack === 'function') {
                 navigation.goBack();
@@ -201,11 +248,19 @@ export default function SettlementConfigScreen({ navigation }) {
     } catch (err) {
       const message = err.code === 'functions/already-exists'
         ? 'This wallet address is already linked with another user account.'
-        : (err.message || 'Failed to update wallet address.');
+        : (err.message || 'Verification failed. Please try again.');
       Alert.alert('Error', message);
     } finally {
+      setOtpVerifying(false);
       setLoading(false);
     }
+  };
+
+  const handleOtpCancel = () => {
+    setOtpModalVisible(false);
+    setOtpCode('');
+    stopOtpTimer();
+    pendingSaveRef.current = null;
   };
 
   const handleBackAction = () => {
@@ -246,7 +301,7 @@ export default function SettlementConfigScreen({ navigation }) {
               <Text style={currentStyles.alertTitle}>Secure Settlement Protocol</Text>
             </View>
             <Text style={currentStyles.alertDescription}>
-              Withdrawals will be transferred exclusively to this address. Select your preferred blockchain network and ensure the input is accurate.
+              Withdrawals will be transferred exclusively to this address. A verification code will be sent to your registered email before any change is saved.
             </Text>
           </View>
 
@@ -327,17 +382,58 @@ export default function SettlementConfigScreen({ navigation }) {
         <TouchableOpacity
           style={[styles.actionButton, isWalletSaved && !isEditable ? styles.updateButtonColor : styles.saveButtonColor]}
           onPress={handleActionClick}
-          disabled={loading || initialLoading}
+          disabled={loading || initialLoading || otpSending}
         >
-          {loading ? (
+          {(loading || otpSending) ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.actionButtonText}>
-              {isWalletSaved && !isEditable ? 'Request Wallet Update' : 'Authorize Settlement Address'}
+              {isWalletSaved && !isEditable ? 'Request Wallet Update' : 'Verify & Save Address'}
             </Text>
           )}
         </TouchableOpacity>
       </View>
+
+      <Modal visible={otpModalVisible} transparent animationType="fade" onRequestClose={handleOtpCancel}>
+        <View style={styles.modalOverlay}>
+          <View style={currentStyles.modalCard}>
+            <Text style={currentStyles.modalTitle}>Verify Your Identity</Text>
+            <Text style={styles.modalSubtitle}>
+              We sent a 6-digit code to {auth.currentUser?.email}. Enter it below to confirm this wallet change.
+            </Text>
+            <TextInput
+              style={currentStyles.modalInput}
+              placeholder="Enter 6-digit code"
+              placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+              keyboardType="number-pad"
+              maxLength={6}
+              value={otpCode}
+              onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
+            />
+            <View style={styles.otpTimerRow}>
+              {canResendOtp ? (
+                <TouchableOpacity onPress={handleResendWalletOtp} disabled={otpSending}>
+                  <Text style={styles.resendActiveText}>Resend Code</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
+              )}
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleVerifyWalletOtp} disabled={otpVerifying}>
+                {otpVerifying ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Verify OTP</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -360,7 +456,10 @@ const lightStyles = StyleSheet.create({
   termsBox: { backgroundColor: '#FFF5F5', borderRadius: 16, padding: 16, marginTop: 8, borderWidth: 1, borderColor: '#FEE2E2', marginBottom: 20 },
   termsTitle: { fontSize: 11, fontWeight: '800', color: '#EF4444', letterSpacing: 0.5 },
   termsText: { fontSize: 11, color: '#991B1B', lineHeight: 17, fontWeight: '500', textAlign: 'justify' },
-  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' }
+  footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  modalCard: { width: '88%', backgroundColor: '#FFFFFF', borderRadius: 18, padding: 20 },
+  modalTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
+  modalInput: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, color: '#1E293B', fontSize: 16, fontWeight: '700', marginTop: 14, textAlign: 'center', letterSpacing: 4 }
 });
 
 const darkStyles = StyleSheet.create({
@@ -381,7 +480,10 @@ const darkStyles = StyleSheet.create({
   termsBox: { backgroundColor: '#2D1517', borderRadius: 16, padding: 16, marginTop: 8, borderWidth: 1, borderColor: '#7F1D1D', marginBottom: 20 },
   termsTitle: { fontSize: 11, fontWeight: '800', color: '#F87171', letterSpacing: 0.5 },
   termsText: { fontSize: 11, color: '#FCA5A5', lineHeight: 17, fontWeight: '500', textAlign: 'justify' },
-  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#21262D' }
+  footer: { backgroundColor: '#161B22', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#21262D' },
+  modalCard: { width: '88%', backgroundColor: '#161B22', borderRadius: 18, padding: 20 },
+  modalTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginBottom: 6 },
+  modalInput: { backgroundColor: '#0D1117', borderRadius: 10, borderWidth: 1, borderColor: '#21262D', padding: 12, color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginTop: 14, textAlign: 'center', letterSpacing: 4 }
 });
 
 const styles = StyleSheet.create({
@@ -395,5 +497,15 @@ const styles = StyleSheet.create({
   actionButton: { height: 54, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   saveButtonColor: { backgroundColor: '#10B981' },
   updateButtonColor: { backgroundColor: '#EF4444' },
-  actionButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' }
+  actionButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalSubtitle: { fontSize: 12, color: '#94A3B8', fontWeight: '500', lineHeight: 17 },
+  otpTimerRow: { alignItems: 'center', marginTop: 14, marginBottom: 6 },
+  resendActiveText: { color: '#3B82F6', fontSize: 13, fontWeight: '700' },
+  resendDisabledText: { color: '#94A3B8', fontSize: 13, fontWeight: '500' },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  modalCancelBtn: { flex: 1, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(148,163,184,0.15)' },
+  modalCancelText: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
+  modalConfirmBtn: { flex: 1, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#3B82F6' },
+  modalConfirmText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' }
 });
