@@ -12,7 +12,8 @@ import {
   Alert,
   FlatList,
   ActivityIndicator,
-  Platform
+  Platform,
+  KeyboardAvoidingView
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
@@ -219,10 +220,6 @@ export default function SecurityScreen({ navigation }) {
   const [currentPhone, setCurrentPhone] = useState('Not Set');
   const [currentEmail, setCurrentEmail] = useState('Not Set');
 
-  // OTP verification gates BOTH password changes and email changes now.
-  // For email changes, the code is sent to the NEW address (to confirm the
-  // user actually controls it). For password changes, it's sent to the
-  // account's current, already-verified email.
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpVerifying, setOtpVerifying] = useState(false);
@@ -355,9 +352,6 @@ export default function SecurityScreen({ navigation }) {
     return true;
   };
 
-  // After a sensitive credential change, end the current session and send
-  // the user back to Login — this ensures no other logged-in session stays
-  // valid, and confirms the new password/email actually works.
   const forceReLogin = (message) => {
     const goToLogin = async () => {
       try { await signOut(auth); } catch (e) {}
@@ -382,8 +376,6 @@ export default function SecurityScreen({ navigation }) {
     if (!validateInputs()) return;
 
     if (activeLayer === 'password') {
-      // Send OTP to the account's current (already verified) email before
-      // allowing the password change.
       setOtpSending(true);
       try {
         const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
@@ -400,8 +392,6 @@ export default function SecurityScreen({ navigation }) {
     }
 
     if (activeLayer === 'email') {
-      // Send OTP to the NEW email being added, to confirm the user actually
-      // controls it before it's finalized.
       const cleanEmail = newEmail.trim().toLowerCase();
       setOtpSending(true);
       try {
@@ -418,7 +408,6 @@ export default function SecurityScreen({ navigation }) {
       return;
     }
 
-    // Phone change — not used for login, lower risk, no OTP required.
     setLoading(true);
     try {
       const user = auth.currentUser;
@@ -575,159 +564,164 @@ export default function SecurityScreen({ navigation }) {
         visible={modalVisible}
         onRequestClose={closeModal}
       >
-        <View style={styles.modalOverlay}>
-          <View style={isDarkMode ? darkStyles.modalContent : lightStyles.modalContent}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={isDarkMode ? darkStyles.modalContent : lightStyles.modalContent}>
 
-            <View style={[styles.modalHeader, { borderBottomColor: isDarkMode ? '#21262D' : '#E2E8F0' }]}>
-              <Text style={isDarkMode ? darkStyles.modalTitle : lightStyles.modalTitle}>
-                {activeLayer === 'password' && !otpStep && "Change Login Password"}
-                {activeLayer === 'password' && otpStep && "Verify OTP"}
-                {activeLayer === 'phone' && "Change Phone Number"}
-                {activeLayer === 'email' && !otpStep && "Change Email Address"}
-                {activeLayer === 'email' && otpStep && "Verify New Email"}
-              </Text>
-              <TouchableOpacity onPress={closeModal}>
-                <Feather name="x" size={20} color={isDarkMode ? "#94A3B8" : "#64748B"} />
-              </TouchableOpacity>
-            </View>
-
-            {activeLayer === 'password' && !otpStep && (
-              <View style={styles.formContainer}>
-                <View style={[isDarkMode ? darkStyles.inputFieldContainer : lightStyles.inputFieldContainer, styles.passwordInputWrapper]}>
-                  <TextInput
-                    style={[styles.flexInput, { color: isDarkMode ? '#FFFFFF' : '#1E293B' }]}
-                    placeholder="Enter New Password"
-                    placeholderTextColor="#64748B"
-                    secureTextEntry={securePasswordEntry}
-                    maxLength={20}
-                    value={newPassword}
-                    onChangeText={handlePasswordChange}
-                  />
-                  <TouchableOpacity
-                    style={styles.eyeIconBtn}
-                    onPress={() => setSecurePasswordEntry(!securePasswordEntry)}
-                  >
-                    <Feather
-                      name={securePasswordEntry ? "eye-off" : "eye"}
-                      size={18}
-                      color="#64748B"
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {activeLayer === 'phone' && (
-              <View style={styles.formContainer}>
-                <Text style={styles.currentActiveLabel}>Current Phone: {currentPhone}</Text>
-                <View style={styles.phoneInputRow}>
-                  <TouchableOpacity
-                    style={isDarkMode ? darkStyles.countrySelector : lightStyles.countrySelector}
-                    onPress={() => {
-                      setSearchQuery('');
-                      setCountryModalVisible(false);
-                      setTimeout(() => {
-                        setCountryModalVisible(true);
-                      }, 100);
-                    }}
-                  >
-                    <Text style={[styles.countrySelectorText, { color: isDarkMode ? '#FFFFFF' : '#334155' }]}>{selectedCountry.dial_code}</Text>
-                    <Feather name="chevron-down" size={12} color={isDarkMode ? "#94A3B8" : "#64748B"} />
-                  </TouchableOpacity>
-                  <TextInput
-                    style={[isDarkMode ? darkStyles.inputField : lightStyles.inputField, { flex: 1 }]}
-                    placeholder="Enter New Phone Number"
-                    placeholderTextColor="#64748B"
-                    keyboardType="phone-pad"
-                    value={newPhone}
-                    onChangeText={handlePhoneChange}
-                  />
-                </View>
-              </View>
-            )}
-
-            {activeLayer === 'email' && !otpStep && (
-              <View style={styles.formContainer}>
-                <Text style={styles.currentActiveLabel}>Current Email: {currentEmail}</Text>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={isDarkMode ? darkStyles.inputField : lightStyles.inputField}
-                    placeholder="Enter New Email Address"
-                    placeholderTextColor="#64748B"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    value={newEmail}
-                    onChangeText={setNewEmail}
-                  />
-                </View>
-              </View>
-            )}
-
-            {(activeLayer === 'password' || activeLayer === 'email') && otpStep && (
-              <View style={styles.formContainer}>
-                <Text style={styles.currentActiveLabel}>
-                  {activeLayer === 'password'
-                    ? `We sent a 6-digit code to ${currentEmail}`
-                    : `We sent a 6-digit code to ${newEmail.trim().toLowerCase()}`}
+              <View style={[styles.modalHeader, { borderBottomColor: isDarkMode ? '#21262D' : '#E2E8F0' }]}>
+                <Text style={isDarkMode ? darkStyles.modalTitle : lightStyles.modalTitle}>
+                  {activeLayer === 'password' && !otpStep && "Change Login Password"}
+                  {activeLayer === 'password' && otpStep && "Verify OTP"}
+                  {activeLayer === 'phone' && "Change Phone Number"}
+                  {activeLayer === 'email' && !otpStep && "Change Email Address"}
+                  {activeLayer === 'email' && otpStep && "Verify New Email"}
                 </Text>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={isDarkMode ? darkStyles.inputField : lightStyles.inputField}
-                    placeholder="Enter 6-digit code"
-                    placeholderTextColor="#64748B"
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    value={otpCode}
-                    onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
-                  />
-                </View>
-                <View style={styles.otpTimerRow}>
-                  {canResendOtp ? (
-                    <TouchableOpacity onPress={handleResendOtp} disabled={otpSending}>
-                      <Text style={styles.resendActiveText}>Resend Code</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
-                  )}
-                </View>
+                <TouchableOpacity onPress={closeModal}>
+                  <Feather name="x" size={20} color={isDarkMode ? "#94A3B8" : "#64748B"} />
+                </TouchableOpacity>
               </View>
-            )}
 
-            {activeLayer === 'phone' && (
-              <Text style={styles.infoAlert}>
-                * Phone number changes do not require OTP verification since this number is not used for account login.
-              </Text>
-            )}
+              {activeLayer === 'password' && !otpStep && (
+                <View style={styles.formContainer}>
+                  <View style={[isDarkMode ? darkStyles.inputFieldContainer : lightStyles.inputFieldContainer, styles.passwordInputWrapper]}>
+                    <TextInput
+                      style={[styles.flexInput, { color: isDarkMode ? '#FFFFFF' : '#1E293B' }]}
+                      placeholder="Enter New Password"
+                      placeholderTextColor="#64748B"
+                      secureTextEntry={securePasswordEntry}
+                      maxLength={20}
+                      value={newPassword}
+                      onChangeText={handlePasswordChange}
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeIconBtn}
+                      onPress={() => setSecurePasswordEntry(!securePasswordEntry)}
+                    >
+                      <Feather
+                        name={securePasswordEntry ? "eye-off" : "eye"}
+                        size={18}
+                        color="#64748B"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
-            <View style={styles.modalActions}>
-              {(activeLayer === 'password' || activeLayer === 'email') && otpStep ? (
-                <>
-                  <TouchableOpacity style={styles.cancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
-                    <Text style={styles.cancelBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.submitBtn} onPress={handleVerifyOtp} disabled={otpVerifying}>
-                    {otpVerifying ? (
+              {activeLayer === 'phone' && (
+                <View style={styles.formContainer}>
+                  <Text style={styles.currentActiveLabel}>Current Phone: {currentPhone}</Text>
+                  <View style={styles.phoneInputRow}>
+                    <TouchableOpacity
+                      style={isDarkMode ? darkStyles.countrySelector : lightStyles.countrySelector}
+                      onPress={() => {
+                        setSearchQuery('');
+                        setCountryModalVisible(false);
+                        setTimeout(() => {
+                          setCountryModalVisible(true);
+                        }, 100);
+                      }}
+                    >
+                      <Text style={[styles.countrySelectorText, { color: isDarkMode ? '#FFFFFF' : '#334155' }]}>{selectedCountry.dial_code}</Text>
+                      <Feather name="chevron-down" size={12} color={isDarkMode ? "#94A3B8" : "#64748B"} />
+                    </TouchableOpacity>
+                    <TextInput
+                      style={[isDarkMode ? darkStyles.inputField : lightStyles.inputField, { flex: 1 }]}
+                      placeholder="Enter New Phone Number"
+                      placeholderTextColor="#64748B"
+                      keyboardType="phone-pad"
+                      value={newPhone}
+                      onChangeText={handlePhoneChange}
+                    />
+                  </View>
+                </View>
+              )}
+
+              {activeLayer === 'email' && !otpStep && (
+                <View style={styles.formContainer}>
+                  <Text style={styles.currentActiveLabel}>Current Email: {currentEmail}</Text>
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={isDarkMode ? darkStyles.inputField : lightStyles.inputField}
+                      placeholder="Enter New Email Address"
+                      placeholderTextColor="#64748B"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      value={newEmail}
+                      onChangeText={setNewEmail}
+                    />
+                  </View>
+                </View>
+              )}
+
+              {(activeLayer === 'password' || activeLayer === 'email') && otpStep && (
+                <View style={styles.formContainer}>
+                  <Text style={styles.currentActiveLabel}>
+                    {activeLayer === 'password'
+                      ? `We sent a 6-digit code to ${currentEmail}`
+                      : `We sent a 6-digit code to ${newEmail.trim().toLowerCase()}`}
+                  </Text>
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={isDarkMode ? darkStyles.inputField : lightStyles.inputField}
+                      placeholder="Enter 6-digit code"
+                      placeholderTextColor="#64748B"
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      value={otpCode}
+                      onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
+                    />
+                  </View>
+                  <View style={styles.otpTimerRow}>
+                    {canResendOtp ? (
+                      <TouchableOpacity onPress={handleResendOtp} disabled={otpSending}>
+                        <Text style={styles.resendActiveText}>Resend Code</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
+                    )}
+                  </View>
+                </View>
+              )}
+
+              {activeLayer === 'phone' && (
+                <Text style={styles.infoAlert}>
+                  * Phone number changes do not require OTP verification since this number is not used for account login.
+                </Text>
+              )}
+
+              <View style={styles.modalActions}>
+                {(activeLayer === 'password' || activeLayer === 'email') && otpStep ? (
+                  <>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
+                      <Text style={styles.cancelBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.submitBtn} onPress={handleVerifyOtp} disabled={otpVerifying}>
+                      {otpVerifying ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.submitBtnText}>Verify OTP</Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity style={styles.submitBtn} onPress={handleUpdate} disabled={loading || otpSending}>
+                    {(loading || otpSending) ? (
                       <ActivityIndicator color="#FFFFFF" />
                     ) : (
-                      <Text style={styles.submitBtnText}>Verify OTP</Text>
+                      <Text style={styles.submitBtnText}>
+                        {activeLayer === 'phone' ? 'Update Phone Number' : 'Send Verification Code'}
+                      </Text>
                     )}
                   </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity style={styles.submitBtn} onPress={handleUpdate} disabled={loading || otpSending}>
-                  {(loading || otpSending) ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.submitBtnText}>
-                      {activeLayer === 'phone' ? 'Update Phone Number' : 'Send Verification Code'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
+                )}
+              </View>
 
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
