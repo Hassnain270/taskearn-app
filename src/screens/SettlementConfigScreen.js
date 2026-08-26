@@ -34,9 +34,6 @@ export default function SettlementConfigScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
-  // OTP verification gates the actual save (the real Cloud Function write) —
-  // unlocking an already-saved address for editing is harmless on its own
-  // since nothing is written until the OTP-verified save completes.
   const [otpModalVisible, setOtpModalVisible] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpVerifying, setOtpVerifying] = useState(false);
@@ -44,7 +41,7 @@ export default function SettlementConfigScreen({ navigation }) {
   const [otpTimer, setOtpTimer] = useState(60);
   const [canResendOtp, setCanResendOtp] = useState(false);
   const otpIntervalRef = useRef(null);
-  const pendingSaveRef = useRef(null); // { address, network }
+  const pendingSaveRef = useRef(null);
 
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
@@ -131,8 +128,6 @@ export default function SettlementConfigScreen({ navigation }) {
   const handleActionClick = async () => {
     const trimmedAddress = walletAddress.trim();
 
-    // Unlocking an already-saved address for editing — no write happens
-    // here, so no OTP needed at this step.
     if (isWalletSaved && !isEditable) {
       setIsEditable(true);
       setIsWalletSaved(false);
@@ -169,7 +164,6 @@ export default function SettlementConfigScreen({ navigation }) {
       return;
     }
 
-    // Format is valid — now require OTP verification before the real save.
     pendingSaveRef.current = { address: trimmedAddress, network };
     await sendWalletOtp();
   };
@@ -395,44 +389,49 @@ export default function SettlementConfigScreen({ navigation }) {
       </View>
 
       <Modal visible={otpModalVisible} transparent animationType="fade" onRequestClose={handleOtpCancel}>
-        <View style={styles.modalOverlay}>
-          <View style={currentStyles.modalCard}>
-            <Text style={currentStyles.modalTitle}>Verify Your Identity</Text>
-            <Text style={styles.modalSubtitle}>
-              We sent a 6-digit code to {auth.currentUser?.email}. Enter it below to confirm this wallet change.
-            </Text>
-            <TextInput
-              style={currentStyles.modalInput}
-              placeholder="Enter 6-digit code"
-              placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-              keyboardType="number-pad"
-              maxLength={6}
-              value={otpCode}
-              onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
-            />
-            <View style={styles.otpTimerRow}>
-              {canResendOtp ? (
-                <TouchableOpacity onPress={handleResendWalletOtp} disabled={otpSending}>
-                  <Text style={styles.resendActiveText}>Resend Code</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
-              )}
-            </View>
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleVerifyWalletOtp} disabled={otpVerifying}>
-                {otpVerifying ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={currentStyles.modalCard}>
+              <Text style={currentStyles.modalTitle}>Verify Your Identity</Text>
+              <Text style={styles.modalSubtitle}>
+                We sent a 6-digit code to {auth.currentUser?.email}. Enter it below to confirm this wallet change.
+              </Text>
+              <TextInput
+                style={currentStyles.modalInput}
+                placeholder="Enter 6-digit code"
+                placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                keyboardType="number-pad"
+                maxLength={6}
+                value={otpCode}
+                onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
+              />
+              <View style={styles.otpTimerRow}>
+                {canResendOtp ? (
+                  <TouchableOpacity onPress={handleResendWalletOtp} disabled={otpSending}>
+                    <Text style={styles.resendActiveText}>Resend Code</Text>
+                  </TouchableOpacity>
                 ) : (
-                  <Text style={styles.modalConfirmText}>Verify OTP</Text>
+                  <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
                 )}
-              </TouchableOpacity>
+              </View>
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleVerifyWalletOtp} disabled={otpVerifying}>
+                  {otpVerifying ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.modalConfirmText}>Verify OTP</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
