@@ -11,19 +11,17 @@ import {
   ActivityIndicator,
   Modal,
   Platform,
-  Image
+  Image,
+  KeyboardAvoidingView
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { sendEmailOTP, verifyOTP } from '../services/otpService';
-import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
 
 const functionsInstance = getFunctions();
 
-// Cross-Platform Alert Function
 const showAlert = (title, message, buttons) => {
   if (Platform.OS === 'web') {
     if (buttons && buttons.length > 0) {
@@ -55,9 +53,6 @@ export default function LoginScreen({ navigation }) {
   const [isResetLoading, setIsResetLoading] = useState(false);
 
   const [userData, setUserData] = useState(null);
-  const [selectedChannel, setSelectedChannel] = useState('email');
-  const [verificationId, setVerificationId] = useState(null);
-  const recaptchaVerifier = useRef(null);
 
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
@@ -109,11 +104,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // Looks up the account's email via a Cloud Function, since this must run
-  // BEFORE the user is signed in — the client cannot query other users'
-  // Firestore documents directly. Login is password-only now; every
-  // sensitive follow-up action (wallet changes, password/email changes,
-  // withdrawals) is separately gated by email OTP on its own screen.
   const handleLogin = async () => {
     const inputIdentifier = username.trim();
     const cleanPassword = password.trim();
@@ -160,7 +150,9 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const handleVerifyUsername = async () => {
+  // Forgot password is email-OTP only — phone/SMS OTP was never activated
+  // on the backend, so there's no second channel to choose between.
+  const handleGetOTP = async () => {
     const cleanUsername = recoverUsername.trim();
     if (!cleanUsername || cleanUsername.length < 5) {
       showAlert("Alert", "Username must be at least 6 characters.");
@@ -181,53 +173,22 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      const fetchedUserData = {
-        uid: resolved.uid,
-        username: resolved.username,
-        email: resolved.email,
-        phone: resolved.phone
-      };
-
-      setUserData(fetchedUserData);
-
-      if (selectedChannel === 'email') {
-        if (!fetchedUserData.email) {
-          setIsResetLoading(false);
-          showAlert("Error", "No registered email found for this user.");
-          return;
-        }
-
-        const res = await sendEmailOTP(fetchedUserData.uid, fetchedUserData.email, "forgot_password");
+      if (!resolved.email) {
         setIsResetLoading(false);
-
-        if (res.success) {
-          showAlert("OTP Sent", res.message);
-          setForgetStep(2);
-        } else {
-          showAlert("Error", res.message);
-        }
-      } else {
-        if (!fetchedUserData.phone) {
-          setIsResetLoading(false);
-          showAlert("Error", "No registered phone number found for this user.");
-          return;
-        }
-
-        const res = await sendSMSOTP(fetchedUserData.phone, recaptchaVerifier);
-        setIsResetLoading(false);
-
-        if (res.success) {
-          setVerificationId(res.verificationId);
-          showAlert("OTP Sent", res.message);
-          setForgetStep(2);
-        } else {
-          showAlert("Error", res.message);
-        }
+        showAlert("Error", "No registered email found for this user.");
+        return;
       }
 
+      setUserData({ uid: resolved.uid, username: resolved.username, email: resolved.email });
+
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'FORGOT_PASSWORD', emailInput: resolved.email });
+
+      setIsResetLoading(false);
+      setForgetStep(2);
     } catch (error) {
       setIsResetLoading(false);
-      showAlert("Error", "Failed to send code. Please try again.");
+      showAlert("Error", error.message || "Failed to send code. Please try again.");
     }
   };
 
@@ -235,25 +196,15 @@ export default function LoginScreen({ navigation }) {
     if (!canResend || !userData) return;
 
     setIsResetLoading(true);
-    if (selectedChannel === 'email') {
-      const res = await sendEmailOTP(userData.uid, userData.email, "forgot_password");
+    try {
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'FORGOT_PASSWORD', emailInput: userData.email });
       setIsResetLoading(false);
-      if (res.success) {
-        showAlert("OTP Resent", res.message);
-        startResendTimer();
-      } else {
-        showAlert("Error", res.message);
-      }
-    } else {
-      const res = await sendSMSOTP(userData.phone, recaptchaVerifier);
+      startResendTimer();
+      showAlert("OTP Resent", "A new verification code has been sent to your email.");
+    } catch (error) {
       setIsResetLoading(false);
-      if (res.success) {
-        setVerificationId(res.verificationId);
-        showAlert("OTP Resent", res.message);
-        startResendTimer();
-      } else {
-        showAlert("Error", res.message);
-      }
+      showAlert("Error", error.message || "Failed to resend the code.");
     }
   };
 
@@ -264,25 +215,14 @@ export default function LoginScreen({ navigation }) {
     }
 
     setIsResetLoading(true);
-
-    if (selectedChannel === 'email') {
-      const res = await verifyOTP(userData.uid, otpInput, "forgot_password");
+    try {
+      const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
+      await verifyOtp({ email: userData.email, code: otpInput, purpose: 'FORGOT_PASSWORD' });
       setIsResetLoading(false);
-
-      if (res.success) {
-        setForgetStep(3);
-      } else {
-        showAlert("Error", res.message);
-      }
-    } else {
-      const res = await verifySMSOTP(verificationId, otpInput);
+      setForgetStep(3);
+    } catch (error) {
       setIsResetLoading(false);
-
-      if (res.success) {
-        setForgetStep(3);
-      } else {
-        showAlert("Error", res.message);
-      }
+      showAlert("Error", error.message || "Invalid or expired code.");
     }
   };
 
@@ -314,8 +254,6 @@ export default function LoginScreen({ navigation }) {
     setOtpInput('');
     setNewPassword('');
     setUserData(null);
-    setSelectedChannel('email');
-    setVerificationId(null);
     setIsResetLoading(false);
   };
 
@@ -405,155 +343,135 @@ export default function LoginScreen({ navigation }) {
         visible={forgetModalVisible}
         onRequestClose={resetModal}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Reset Password</Text>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Reset Password</Text>
 
-            {forgetStep === 1 && (
-              <View style={styles.modalStepWrapper}>
-                <Text style={styles.modalLabel}>Enter Username</Text>
-                <View style={styles.modalInputWrapper}>
-                  <MaterialCommunityIcons name="account-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="Username"
-                    placeholderTextColor="#94A3B8"
-                    value={recoverUsername}
-                    onChangeText={(text) => setRecoverUsername(text)}
-                    maxLength={20}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </View>
-
-                <Text style={styles.modalLabel}>Send OTP via:</Text>
-                <View style={styles.channelRow}>
-                  <TouchableOpacity
-                    style={[styles.channelBtn, selectedChannel === 'email' && styles.channelBtnActive]}
-                    onPress={() => setSelectedChannel('email')}
-                  >
-                    <MaterialCommunityIcons
-                      name="email-outline"
-                      size={18}
-                      color={selectedChannel === 'email' ? '#3B82F6' : '#64748B'}
+              {forgetStep === 1 && (
+                <View style={styles.modalStepWrapper}>
+                  <Text style={styles.modalLabel}>Enter Username</Text>
+                  <View style={styles.modalInputWrapper}>
+                    <MaterialCommunityIcons name="account-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Username"
+                      placeholderTextColor="#94A3B8"
+                      value={recoverUsername}
+                      onChangeText={(text) => setRecoverUsername(text)}
+                      maxLength={20}
+                      autoCapitalize="none"
+                      autoCorrect={false}
                     />
-                    <Text style={[styles.channelText, selectedChannel === 'email' && styles.channelTextActive]}>Email</Text>
-                  </TouchableOpacity>
+                  </View>
 
-                  <TouchableOpacity
-                    style={[styles.channelBtn, selectedChannel === 'phone' && styles.channelBtnActive]}
-                    onPress={() => setSelectedChannel('phone')}
+                  <TouchableOpacity 
+                    style={[styles.modalBtn, isResetLoading && styles.disabledBtn]} 
+                    onPress={handleGetOTP}
+                    disabled={isResetLoading}
                   >
-                    <MaterialCommunityIcons
-                      name="cellphone"
-                      size={18}
-                      color={selectedChannel === 'phone' ? '#3B82F6' : '#64748B'}
-                    />
-                    <Text style={[styles.channelText, selectedChannel === 'phone' && styles.channelTextActive]}>Phone</Text>
+                    {isResetLoading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalBtnText}>Get OTP</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
+              )}
 
-                <TouchableOpacity 
-                  style={[styles.modalBtn, isResetLoading && styles.disabledBtn]} 
-                  onPress={handleVerifyUsername}
-                  disabled={isResetLoading}
-                >
-                  {isResetLoading ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.modalBtnText}>Send OTP Code</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
+              {forgetStep === 2 && (
+                <View style={styles.modalStepWrapper}>
+                  <Text style={styles.modalLabel}>
+                    Enter the 6-digit code sent to {userData?.email}
+                  </Text>
+                  <View style={styles.modalInputWrapper}>
+                    <MaterialCommunityIcons name="cellphone-key" size={20} color="#94A3B8" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Verification Code"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      value={otpInput}
+                      onChangeText={(text) => setOtpInput(text.replace(/[^0-9]/g, ''))}
+                    />
+                  </View>
 
-            {forgetStep === 2 && (
-              <View style={styles.modalStepWrapper}>
-                <Text style={styles.modalLabel}>Enter 6-Digit OTP</Text>
-                <View style={styles.modalInputWrapper}>
-                  <MaterialCommunityIcons name="cellphone-key" size={20} color="#94A3B8" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="Verification Code"
-                    placeholderTextColor="#94A3B8"
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    value={otpInput}
-                    onChangeText={(text) => setOtpInput(text.replace(/[^0-9]/g, ''))}
-                  />
+                  <View style={styles.timerContainer}>
+                    {canResend ? (
+                      <TouchableOpacity onPress={handleResendOTP} disabled={isResetLoading}>
+                        <Text style={styles.resendActiveText}>Resend OTP</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <Text style={styles.resendDisabledText}>Resend OTP in 0:{timer < 10 ? `0${timer}` : timer}</Text>
+                    )}
+                  </View>
+
+                  <TouchableOpacity 
+                    style={[styles.modalBtn, isResetLoading && styles.disabledBtn]} 
+                    onPress={handleVerifyOTP}
+                    disabled={isResetLoading}
+                  >
+                    {isResetLoading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalBtnText}>Verify OTP</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
+              )}
 
-                <View style={styles.timerContainer}>
-                  {canResend ? (
-                    <TouchableOpacity onPress={handleResendOTP} disabled={isResetLoading}>
-                      <Text style={styles.resendActiveText}>Resend OTP</Text>
+              {forgetStep === 3 && (
+                <View style={styles.modalStepWrapper}>
+                  <Text style={styles.modalLabel}>New Password</Text>
+                  <View style={styles.modalInputWrapper}>
+                    <MaterialCommunityIcons name="lock-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="New Password"
+                      placeholderTextColor="#94A3B8"
+                      secureTextEntry={!showNewPassword}
+                      value={newPassword}
+                      onChangeText={(text) => setNewPassword(text)}
+                      maxLength={20}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)} style={styles.eyeIcon}>
+                      <MaterialCommunityIcons
+                        name={showNewPassword ? "eye-outline" : "eye-off-outline"}
+                        size={20}
+                        color="#94A3B8"
+                      />
                     </TouchableOpacity>
-                  ) : (
-                    <Text style={styles.resendDisabledText}>Resend OTP in 0:{timer < 10 ? `0${timer}` : timer}</Text>
-                  )}
-                </View>
-
-                <TouchableOpacity 
-                  style={[styles.modalBtn, isResetLoading && styles.disabledBtn]} 
-                  onPress={handleVerifyOTP}
-                  disabled={isResetLoading}
-                >
-                  {isResetLoading ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.modalBtnText}>Verify OTP</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {forgetStep === 3 && (
-              <View style={styles.modalStepWrapper}>
-                <Text style={styles.modalLabel}>New Password</Text>
-                <View style={styles.modalInputWrapper}>
-                  <MaterialCommunityIcons name="lock-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="New Password"
-                    placeholderTextColor="#94A3B8"
-                    secureTextEntry={!showNewPassword}
-                    value={newPassword}
-                    onChangeText={(text) => setNewPassword(text)}
-                    maxLength={20}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)} style={styles.eyeIcon}>
-                    <MaterialCommunityIcons
-                      name={showNewPassword ? "eye-outline" : "eye-off-outline"}
-                      size={20}
-                      color="#94A3B8"
-                    />
+                  </View>
+                  <TouchableOpacity 
+                    style={[styles.modalBtn, isResetLoading && styles.disabledBtn]} 
+                    onPress={handleSaveNewPassword}
+                    disabled={isResetLoading}
+                  >
+                    {isResetLoading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalBtnText}>Save Password</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity 
-                  style={[styles.modalBtn, isResetLoading && styles.disabledBtn]} 
-                  onPress={handleSaveNewPassword}
-                  disabled={isResetLoading}
-                >
-                  {isResetLoading ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.modalBtnText}>Save Password</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
+              )}
 
-            <TouchableOpacity
-              style={styles.closeModalBtn}
-              onPress={resetModal}
-              disabled={isResetLoading}
-            >
-              <Text style={styles.closeModalBtnText}>Cancel</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.closeModalBtn}
+                onPress={resetModal}
+                disabled={isResetLoading}
+              >
+                <Text style={styles.closeModalBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -587,11 +505,6 @@ const styles = StyleSheet.create({
   modalLabel: { fontSize: 13, fontWeight: '600', color: '#475569', marginBottom: 6 },
   modalInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, height: 50, marginBottom: 16 },
   modalInput: { flex: 1, color: '#1E293B', fontSize: 14, fontWeight: '500', height: '100%' },
-  channelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  channelBtn: { flex: 0.48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingVertical: 10 },
-  channelBtnActive: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
-  channelText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
-  channelTextActive: { color: '#3B82F6' },
   timerContainer: { alignItems: 'center', marginBottom: 16, marginTop: -4 },
   resendActiveText: { color: '#3B82F6', fontSize: 14, fontWeight: '700' },
   resendDisabledText: { color: '#94A3B8', fontSize: 14, fontWeight: '500' },
