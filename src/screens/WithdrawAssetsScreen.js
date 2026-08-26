@@ -145,6 +145,14 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
       return;
     }
 
+    // Passkey/biometric hardware doesn't exist in a browser — go straight
+    // to submitting the request on web, exactly like Login/Settlement/
+    // Security already do.
+    if (Platform.OS === 'web') {
+      await executeWithdrawal();
+      return;
+    }
+
     try {
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
