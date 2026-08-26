@@ -23,9 +23,6 @@ import { ThemeContext } from '../../ThemeContext';
 
 const functionsInstance = getFunctions();
 
-// Mirrors the exact same VIP tier table used server-side (functions/index.js),
-// so the locked-capital figure shown here always matches what the backend
-// will actually enforce when the withdrawal request is processed.
 const VIP_TIERS = [
   { id: 10, minCapital: 20000 },
   { id: 9,  minCapital: 10000 },
@@ -57,10 +54,6 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // OTP verification now gates the actual withdrawal submission — this
-  // replaces the old passkey/biometric check entirely, since password-only
-  // login could otherwise let an attacker with a stolen password drain
-  // funds. The code goes to the account's current, already-verified email.
   const [otpModalVisible, setOtpModalVisible] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpSending, setOtpSending] = useState(false);
@@ -244,7 +237,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   };
 
   const handleWalletBoxPress = () => {
-    if (hasWallet) return; // already configured — box is display-only
+    if (hasWallet) return;
     if (navigation && typeof navigation.navigate === 'function') {
       navigation.navigate('Settlement');
     }
@@ -403,44 +396,49 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
       </View>
 
       <Modal visible={otpModalVisible} transparent animationType="fade" onRequestClose={handleOtpCancel}>
-        <View style={styles.modalOverlay}>
-          <View style={currentStyles.otpModalCard}>
-            <Text style={currentStyles.otpModalTitle}>Verify Your Identity</Text>
-            <Text style={styles.otpModalSubtitle}>
-              We sent a 6-digit code to {auth.currentUser?.email}. Enter it below to confirm this withdrawal request.
-            </Text>
-            <TextInput
-              style={currentStyles.otpModalInput}
-              placeholder="Enter 6-digit code"
-              placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-              keyboardType="number-pad"
-              maxLength={6}
-              value={otpCode}
-              onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
-            />
-            <View style={styles.otpTimerRow}>
-              {canResendOtp ? (
-                <TouchableOpacity onPress={handleResendWithdrawOtp} disabled={otpSending}>
-                  <Text style={styles.resendActiveText}>Resend Code</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
-              )}
-            </View>
-            <View style={styles.otpModalActions}>
-              <TouchableOpacity style={styles.otpCancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
-                <Text style={styles.otpCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.otpConfirmBtn} onPress={handleVerifyWithdrawOtp} disabled={otpVerifying}>
-                {otpVerifying ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={currentStyles.otpModalCard}>
+              <Text style={currentStyles.otpModalTitle}>Verify Your Identity</Text>
+              <Text style={styles.otpModalSubtitle}>
+                We sent a 6-digit code to {auth.currentUser?.email}. Enter it below to confirm this withdrawal request.
+              </Text>
+              <TextInput
+                style={currentStyles.otpModalInput}
+                placeholder="Enter 6-digit code"
+                placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                keyboardType="number-pad"
+                maxLength={6}
+                value={otpCode}
+                onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, ''))}
+              />
+              <View style={styles.otpTimerRow}>
+                {canResendOtp ? (
+                  <TouchableOpacity onPress={handleResendWithdrawOtp} disabled={otpSending}>
+                    <Text style={styles.resendActiveText}>Resend Code</Text>
+                  </TouchableOpacity>
                 ) : (
-                  <Text style={styles.otpConfirmText}>Verify OTP</Text>
+                  <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
                 )}
-              </TouchableOpacity>
+              </View>
+              <View style={styles.otpModalActions}>
+                <TouchableOpacity style={styles.otpCancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
+                  <Text style={styles.otpCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.otpConfirmBtn} onPress={handleVerifyWithdrawOtp} disabled={otpVerifying}>
+                  {otpVerifying ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.otpConfirmText}>Verify OTP</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
     </SafeAreaView>
