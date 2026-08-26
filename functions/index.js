@@ -514,9 +514,6 @@ exports.updateWithdrawalStatus = onCall(
     const withdrawalRef = db.collection("withdrawals").doc(withdrawalId);
     const cleanReason = (reason || "").trim();
 
-    // Step 1: atomically "claim" this withdrawal by flipping pending -> processing.
-    // This is the guard against double-processing (e.g. a double-tap on Approve):
-    // only ONE concurrent call can win this atomic check-and-set.
     let withdrawalData;
     await db.runTransaction(async (transaction) => {
       const withdrawalDoc = await transaction.get(withdrawalRef);
@@ -534,7 +531,6 @@ exports.updateWithdrawalStatus = onCall(
       });
     });
 
-    // Step 2 (rejected path): no on-chain action — refund and finalize.
     if (newStatus === "rejected") {
       try {
         await db.runTransaction(async (transaction) => {
@@ -601,8 +597,6 @@ exports.updateWithdrawalStatus = onCall(
       }
     }
 
-    // Step 2 (approved path): send the real on-chain payout from the master
-    // wallet BEFORE marking anything as completed.
     const mnemonic = process.env.TRON_MNEMONIC;
     let confirmedTxHash;
 
@@ -618,8 +612,6 @@ exports.updateWithdrawalStatus = onCall(
     } catch (payoutError) {
       console.error(`Automatic payout failed for withdrawal ${withdrawalId}:`, payoutError.message);
 
-      // Revert the claim so the withdrawal goes back to pending and can be
-      // retried — the user's balance is untouched either way.
       await withdrawalRef.update({
         status: "pending",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -631,7 +623,6 @@ exports.updateWithdrawalStatus = onCall(
       );
     }
 
-    // Step 3: payout succeeded on-chain — finalize the records.
     try {
       await db.runTransaction(async (transaction) => {
         const linkedTxQuery = db.collection("transactions").where("withdrawalId", "==", withdrawalId).limit(1);
@@ -667,10 +658,6 @@ exports.updateWithdrawalStatus = onCall(
 
       return { success: true, message: "Withdrawal completed and funds sent automatically.", txHash: confirmedTxHash };
     } catch (error) {
-      // The on-chain transfer already happened at this point — if this
-      // Firestore write fails, funds are safely sent but records may be
-      // stale. Log loudly for manual reconciliation rather than losing
-      // track silently.
       console.error(`CRITICAL: Payout for ${withdrawalId} succeeded on-chain (tx: ${confirmedTxHash}) but Firestore finalize failed:`, error);
       throw new HttpsError("internal", `Payout sent (tx: ${confirmedTxHash}) but failed to update records. Please check manually.`);
     }
@@ -1204,42 +1191,78 @@ exports.completeTask = onCall(async (request) => {
   }
 });
 
-exports.sendEmailOTP = onCall(async (request) => {
-  const { purpose, emailInput, username } = request.data || {};
-  const db = admin.firestore();
-  let targetEmail = emailInput;
+// ============================================
+// EMAIL OTP — now sent via Brevo's transactional email API instead of the
+// old Gmail-based Firestore "Trigger Email" extension.
+// ============================================
 
-  if (purpose === "FORGOT_PASSWORD" && username) {
-    const userQuery = await db.collection("users").where("username", "==", username).limit(1).get();
-    if (userQuery.empty) throw new HttpsError("not-found", "Username not found.");
-    targetEmail = userQuery.docs[0].data().email;
-  } else if (request.auth && !targetEmail) {
-    const userDoc = await db.collection("users").doc(request.auth.uid).get();
-    if (userDoc.exists) targetEmail = userDoc.data().email;
+exports.sendEmailOTP = onCall(
+  { secrets: ["BREVO_API_KEY"] },
+  async (request) => {
+    const { purpose, emailInput, username } = request.data || {};
+    const db = admin.firestore();
+    let targetEmail = emailInput;
+
+    if (purpose === "FORGOT_PASSWORD" && username) {
+      const userQuery = await db.collection("users").where("username", "==", username).limit(1).get();
+      if (userQuery.empty) throw new HttpsError("not-found", "Username not found.");
+      targetEmail = userQuery.docs[0].data().email;
+    } else if (request.auth && !targetEmail) {
+      const userDoc = await db.collection("users").doc(request.auth.uid).get();
+      if (userDoc.exists) targetEmail = userDoc.data().email;
+    }
+
+    if (!targetEmail) throw new HttpsError("invalid-argument", "Email address is required.");
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+
+    await db.collection("otps").doc(targetEmail).set({
+      code: otpCode,
+      purpose: purpose,
+      expiresAt: expiresAt,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) throw new HttpsError("internal", "Email service configuration missing.");
+
+    try {
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "api-key": apiKey,
+        },
+        body: JSON.stringify({
+          sender: { name: "TaskEarn", email: "otp@taskearn-app.com" },
+          to: [{ email: targetEmail }],
+          subject: `TaskEarn Verification Code - ${otpCode}`,
+          htmlContent: `<div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+            <h2 style="color: #1E293B;">TaskEarn Verification Code</h2>
+            <p style="color: #475569; font-size: 14px;">Use the code below to complete your request. This code will expire in 5 minutes.</p>
+            <div style="background: #F1F5F9; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
+              <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #2563EB;">${otpCode}</span>
+            </div>
+            <p style="color: #94A3B8; font-size: 12px;">If you did not request this code, you can safely ignore this email.</p>
+          </div>`,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("Brevo send error:", response.status, errText);
+        throw new Error("Failed to send verification email.");
+      }
+    } catch (sendError) {
+      console.error("Error sending OTP via Brevo:", sendError);
+      throw new HttpsError("internal", "Failed to send verification email. Please try again.");
+    }
+
+    return { success: true, email: targetEmail };
   }
-
-  if (!targetEmail) throw new HttpsError("invalid-argument", "Email address is required.");
-
-  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + 5 * 60 * 1000;
-
-  await db.collection("otps").doc(targetEmail).set({
-    code: otpCode,
-    purpose: purpose,
-    expiresAt: expiresAt,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  await db.collection("mail").add({
-    to: targetEmail,
-    message: {
-      subject: `TaskEarn OTP Code - ${purpose}`,
-      text: `Your OTP verification code for TaskEarn is: ${otpCode}. This code will expire in 5 minutes.`,
-    },
-  });
-
-  return { success: true, email: targetEmail };
-});
+);
 
 exports.verifyEmailOTP = onCall(async (request) => {
   const { email, code, purpose } = request.data || {};
