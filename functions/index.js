@@ -802,21 +802,28 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const activeTier = getVipTierByBalance(finalUserBalance);
     const baseVipCapital = activeTier ? activeTier.minCapital : 0;
 
-    // Pre-fetch the entire referral chain BEFORE any writes — Firestore
-    // transactions require every read to happen before any write. The
-    // previous version read level1/level2 docs AFTER writes had already
-    // started, which caused every VIP-tier deposit with a referral chain
-    // to fail repeatedly (retried every scheduler run, never succeeding).
+    // Pre-fetch the entire referral chain BEFORE any writes (Firestore
+    // transaction rule requires all reads before any write).
+    //
+    // IMPORTANT FIX: "referredBy" stores the referral CODE text the user
+    // typed at registration (e.g. "BV5DUF") — it is NOT a Firestore
+    // document ID. The actual UID of the referrer is stored separately as
+    // "referredByUid". The previous version incorrectly did
+    // db.collection("users").doc(userData.referredBy), which looked for a
+    // document whose ID equals a 6-character code — such a document can
+    // essentially never exist (real UIDs are long random strings), so
+    // level1Doc.exists was always false and every referral bonus was
+    // silently skipped, with no error ever thrown.
     let level1Ref = null, level1Doc = null, level1Data = null;
     let level2Ref = null, level2Doc = null, level2Data = null;
 
-    if (baseVipCapital > 0 && userData.referredBy) {
-      level1Ref = db.collection("users").doc(userData.referredBy);
+    if (baseVipCapital > 0 && userData.referredByUid) {
+      level1Ref = db.collection("users").doc(userData.referredByUid);
       level1Doc = await transaction.get(level1Ref);
       if (level1Doc.exists) {
         level1Data = level1Doc.data();
-        if (level1Data.referredBy) {
-          level2Ref = db.collection("users").doc(level1Data.referredBy);
+        if (level1Data.referredByUid) {
+          level2Ref = db.collection("users").doc(level1Data.referredByUid);
           level2Doc = await transaction.get(level2Ref);
           if (level2Doc.exists) {
             level2Data = level2Doc.data();
@@ -878,7 +885,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       const directBonusTxRef = db.collection("transactions").doc();
       transaction.set(directBonusTxRef, {
         transactionId: directBonusTxRef.id,
-        userId: userData.referredBy,
+        userId: userData.referredByUid,
         type: "DIRECT_REFERRAL_BONUS",
         amount: directBonus,
         fromUserId: userId,
@@ -902,7 +909,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
         const indirectBonusTxRef = db.collection("transactions").doc();
         transaction.set(indirectBonusTxRef, {
           transactionId: indirectBonusTxRef.id,
-          userId: level1Data.referredBy,
+          userId: level1Data.referredByUid,
           type: "INDIRECT_REFERRAL_BONUS",
           amount: indirectBonus,
           fromUserId: userId,
