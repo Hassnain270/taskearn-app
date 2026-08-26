@@ -14,13 +14,9 @@ import {
   Image
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as Application from 'expo-application';
-import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { sendEmailOTP, verifyOTP } from '../services/otpService';
 import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
@@ -41,23 +37,6 @@ const showAlert = (title, message, buttons) => {
     }
   } else {
     Alert.alert(title, message, buttons);
-  }
-};
-
-// Cross-Platform Storage Helper
-const setSecureItem = async (key, value) => {
-  if (Platform.OS === 'web') {
-    await AsyncStorage.setItem(key, value);
-  } else {
-    await SecureStore.setItemAsync(key, value);
-  }
-};
-
-const getSecureItem = async (key) => {
-  if (Platform.OS === 'web') {
-    return await AsyncStorage.getItem(key);
-  } else {
-    return await SecureStore.getItemAsync(key);
   }
 };
 
@@ -83,22 +62,6 @@ export default function LoginScreen({ navigation }) {
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
   const intervalRef = useRef(null);
-
-  const [deviceId, setDeviceId] = useState('');
-
-  useEffect(() => {
-    const fetchDeviceId = async () => {
-      let id = 'web-browser-device';
-      if (Platform.OS === 'android') {
-        id = Application.androidId || 'android-device';
-      } else if (Platform.OS === 'ios') {
-        const iosId = await Application.getIosIdForVendorAsync();
-        id = iosId || 'ios-device';
-      }
-      setDeviceId(id);
-    };
-    fetchDeviceId();
-  }, []);
 
   useEffect(() => {
     if (forgetModalVisible && forgetStep === 2) {
@@ -131,35 +94,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const verifyPasskeyHardware = async () => {
-    if (Platform.OS === 'web') return true; // Web par passkey optional bypass
-
-    try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-
-      if (!hasHardware || !isEnrolled) {
-        showAlert(
-          "Passkey Security Required",
-          "Please enable screen lock or biometric security in your device settings to proceed with Passkey."
-        );
-        return false;
-      }
-
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Authorize Passkey Security",
-        fallbackLabel: "Use Device PIN",
-        cancelLabel: "Cancel",
-        disableDeviceFallback: false
-      });
-
-      return result.success;
-    } catch (error) {
-      showAlert("Authentication Error", "Passkey verification failed.");
-      return false;
-    }
-  };
-
   const navigateToHome = (params = {}) => {
     if (navigation) {
       if (typeof navigation.reset === 'function') {
@@ -175,9 +109,11 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // Looks up the account's email (and other non-sensitive metadata) via a
-  // Cloud Function, since this must run BEFORE the user is signed in — the
-  // client cannot query other users' Firestore documents directly.
+  // Looks up the account's email via a Cloud Function, since this must run
+  // BEFORE the user is signed in — the client cannot query other users'
+  // Firestore documents directly. Login is password-only now; every
+  // sensitive follow-up action (wallet changes, password/email changes,
+  // withdrawals) is separately gated by email OTP on its own screen.
   const handleLogin = async () => {
     const inputIdentifier = username.trim();
     const cleanPassword = password.trim();
@@ -211,131 +147,16 @@ export default function LoginScreen({ navigation }) {
       const userCredential = await signInWithEmailAndPassword(auth, userEmail, cleanPassword);
       const uid = userCredential.user.uid;
 
-      // Safe cross-platform storage
-      await setSecureItem(`passkey_email_${uid}`, userEmail);
-      await setSecureItem(`passkey_pass_${uid}`, cleanPassword);
-
-      // Now that we're authenticated as this exact uid, we're allowed to
-      // read our own document directly.
       const userDocRef = doc(db, 'users', uid);
       const docSnap = await getDoc(userDocRef);
-      let existingData = docSnap.exists() ? { uid, ...docSnap.data() } : { uid };
+      const existingData = docSnap.exists() ? { uid, ...docSnap.data() } : { uid };
 
-      if (existingData?.username) {
-        await setSecureItem(`passkey_user_${existingData.username}`, uid);
-      }
-
-      if (!existingData?.passkeyRegistered && Platform.OS !== 'web') {
-        setIsLoading(false);
-        showAlert(
-          "Register Passkey Required",
-          "First-time setup: You must add your device screen lock Passkey for account protection.",
-          [
-            {
-              text: "Setup Passkey Now",
-              onPress: async () => {
-                setIsLoading(true);
-                const isVerified = await verifyPasskeyHardware();
-                if (isVerified) {
-                  await updateDoc(userDocRef, {
-                    passkeyRegistered: true,
-                    registeredDeviceId: deviceId
-                  });
-                  setIsLoading(false);
-                  showAlert("Passkey Bound", "Your device Passkey has been successfully registered!");
-                  navigateToHome({ userData: { ...existingData, passkeyRegistered: true, registeredDeviceId: deviceId } });
-                } else {
-                  setIsLoading(false);
-                  showAlert("Setup Cancelled", "Passkey enrollment is compulsory to continue.");
-                }
-              }
-            }
-          ]
-        );
-      } else {
-        setIsLoading(false);
-        navigateToHome({ userData: existingData });
-      }
+      setIsLoading(false);
+      navigateToHome({ userData: existingData });
 
     } catch (error) {
       setIsLoading(false);
       showAlert("Login Failed", error.message || "Invalid username or password");
-    }
-  };
-
-  const handleLoginWithPasskey = async () => {
-    const inputIdentifier = username.trim();
-
-    if (!inputIdentifier) {
-      showAlert("Passkey Login", "Please enter your username first.");
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      const resolveIdentifier = httpsCallable(functionsInstance, 'resolveLoginIdentifier');
-      let resolved;
-      try {
-        const res = await resolveIdentifier({ identifier: inputIdentifier });
-        resolved = res.data;
-      } catch (resolveErr) {
-        setIsLoading(false);
-        showAlert("Passkey Failed", "User not found.");
-        return;
-      }
-
-      const targetUid = resolved?.uid;
-      if (!targetUid) {
-        setIsLoading(false);
-        showAlert("Passkey Failed", "User not found.");
-        return;
-      }
-
-      if (!resolved.passkeyRegistered) {
-        setIsLoading(false);
-        showAlert("Passkey Not Configured", "Please log in with your password first to bind your Passkey.");
-        return;
-      }
-
-      if (resolved.registeredDeviceId && deviceId && resolved.registeredDeviceId !== deviceId && Platform.OS !== 'web') {
-        setIsLoading(false);
-        showAlert(
-          "Unauthorized Device",
-          "Passkey mismatch! Your registered Passkey is bound to another device. Please login with Password."
-        );
-        return;
-      }
-
-      const isVerified = await verifyPasskeyHardware();
-      if (isVerified) {
-        const savedEmail = await getSecureItem(`passkey_email_${targetUid}`);
-        const savedPass = await getSecureItem(`passkey_pass_${targetUid}`);
-
-        if (!savedEmail || !savedPass) {
-          setIsLoading(false);
-          showAlert(
-            "Passkey Setup Required",
-            "Please log in with your password once on this device to activate Passkey authentication."
-          );
-          return;
-        }
-
-        await signInWithEmailAndPassword(auth, savedEmail, savedPass);
-
-        const freshSnap = await getDoc(doc(db, 'users', targetUid));
-        const freshData = freshSnap.exists() ? freshSnap.data() : {};
-        const fullProfileData = { uid: targetUid, id: targetUid, ...freshData };
-
-        setIsLoading(false);
-        showAlert("Passkey Authorized", "Device authentication successful!");
-        navigateToHome({ userData: fullProfileData });
-      } else {
-        setIsLoading(false);
-      }
-    } catch (error) {
-      setIsLoading(false);
-      showAlert("Passkey Failed", "Unable to authenticate Passkey.");
     }
   };
 
@@ -465,29 +286,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const handleBypassViaPasskey = async () => {
-    if (!userData) return;
-
-    if (!userData.passkeyRegistered) {
-      showAlert("Passkey Unavailable", "Passkey was never configured on this account. Please verify via OTP.");
-      return;
-    }
-
-    if (userData.registeredDeviceId !== deviceId && Platform.OS !== 'web') {
-      showAlert(
-        "Unauthorized Device Passkey",
-        "Your account Passkey is bound to a different mobile device. Cannot reset password using this device's Passkey."
-      );
-      return;
-    }
-
-    const isVerified = await verifyPasskeyHardware();
-    if (isVerified) {
-      showAlert("Passkey Verified", "Device Passkey authorization successful!");
-      setForgetStep(3);
-    }
-  };
-
   const handleSaveNewPassword = async () => {
     if (newPassword.length < 6) {
       showAlert("Alert", "Password must be at least 6 characters.");
@@ -499,10 +297,6 @@ export default function LoginScreen({ navigation }) {
     try {
       const resetPasswordFunc = httpsCallable(functionsInstance, 'resetUserPassword');
       await resetPasswordFunc({ uid: userData.uid, newPassword: newPassword });
-
-      if (userData?.uid) {
-        await setSecureItem(`passkey_pass_${userData.uid}`, newPassword);
-      }
 
       setIsResetLoading(false);
       showAlert("Success", "Your password has been changed successfully.");
@@ -596,17 +390,6 @@ export default function LoginScreen({ navigation }) {
             <Text style={styles.loginBtnText}>Login</Text>
           )}
         </TouchableOpacity>
-
-        {Platform.OS !== 'web' && (
-  <TouchableOpacity
-    style={styles.passkeyLoginBtn}
-    onPress={handleLoginWithPasskey}
-    disabled={isLoading}
-  >
-    <MaterialCommunityIcons name="fingerprint" size={22} color="#3B82F6" />
-    <Text style={styles.passkeyLoginBtnText}>Login with Passkey</Text>
-  </TouchableOpacity>
-)}
 
         <View style={styles.footerRow}>
           <Text style={styles.footerText}>Don't have an account? </Text>
@@ -721,15 +504,6 @@ export default function LoginScreen({ navigation }) {
                     <Text style={styles.modalBtnText}>Verify OTP</Text>
                   )}
                 </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={styles.passkeyAltBtn}
-                  onPress={handleBypassViaPasskey}
-                  disabled={isResetLoading}
-                >
-                  <MaterialCommunityIcons name="shield-key-outline" size={18} color="#059669" />
-                  <Text style={styles.passkeyAltBtnText}>Didn't get OTP? Reset via Passkey</Text>
-                </TouchableOpacity>
               </View>
             )}
 
@@ -801,8 +575,6 @@ const styles = StyleSheet.create({
   forgetContainer: { alignSelf: 'flex-end', marginBottom: 20, marginTop: -4 },
   forgetText: { color: '#3B82F6', fontSize: 14, fontWeight: '600' },
   loginBtn: { backgroundColor: '#3B82F6', height: 52, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 10, elevation: 2, shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 4 },
-  passkeyLoginBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 50, borderRadius: 12, borderWidth: 1, borderColor: '#3B82F6', backgroundColor: '#EFF6FF', marginTop: 12, gap: 8 },
-  passkeyLoginBtnText: { color: '#3B82F6', fontSize: 15, fontWeight: '700' },
   disabledBtn: { backgroundColor: '#93C5FD' },
   loginBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   footerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 24 },
@@ -825,8 +597,6 @@ const styles = StyleSheet.create({
   resendDisabledText: { color: '#94A3B8', fontSize: 14, fontWeight: '500' },
   modalBtn: { backgroundColor: '#3B82F6', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', width: '100%', elevation: 1 },
   modalBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  passkeyAltBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 14, paddingVertical: 10, backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 10, gap: 6 },
-  passkeyAltBtnText: { color: '#059669', fontSize: 13, fontWeight: '700' },
   closeModalBtn: { marginTop: 16, padding: 4 },
   closeModalBtnText: { color: '#64748B', fontSize: 14, fontWeight: '600' }
 });
