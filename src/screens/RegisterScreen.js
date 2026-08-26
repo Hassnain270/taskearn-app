@@ -197,7 +197,7 @@ const ALL_COUNTRIES = [
   { code: 'UY', name: 'Uruguay', dial_code: '+598', minLen: 8, maxLen: 8, flag: '🇺🇾' },
   { code: 'UZ', name: 'Uzbekistan', dial_code: '+998', minLen: 9, maxLen: 9, flag: '🇺🇿' },
   { code: 'VE', name: 'Venezuela', dial_code: '+58', minLen: 10, maxLen: 10, flag: '🇻🇪' },
-  { code: 'VN', name: 'Vietnam', dial_code: '+84', minLen: 9, maxLen: 10, flag: '🇻🇳' },
+  { code: 'VN', name: 'Vietnam', dial_code: '+84', minLen: 9, maxLen: 11, flag: '🇻🇳' },
   { code: 'YE', name: 'Yemen', dial_code: '+967', minLen: 9, maxLen: 9, flag: '🇾🇪' },
   { code: 'ZM', name: 'Zambia', dial_code: '+260', minLen: 9, maxLen: 9, flag: '🇿🇲' },
   { code: 'ZW', name: 'Zimbabwe', dial_code: '+263', minLen: 9, maxLen: 9, flag: '🇿🇼' }
@@ -260,6 +260,15 @@ export default function RegisterScreen({ navigation, route }) {
 
   const generateReferralCode = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
+  };
+
+  // Same constraint as the Login screen's username field: no spaces,
+  // maximum 12 characters.
+  const handleUsernameChange = (text) => {
+    const noSpaces = text.replace(/\s/g, '');
+    if (noSpaces.length <= 12) {
+      setUsername(noSpaces);
+    }
   };
 
   const filteredCountries = useMemo(() => {
@@ -444,7 +453,7 @@ export default function RegisterScreen({ navigation, route }) {
                   placeholder="johndoe123"
                   placeholderTextColor="#64748b"
                   value={username}
-                  onChangeText={setUsername}
+                  onChangeText={handleUsernameChange}
                   autoCapitalize="none"
                   maxLength={12}
                 />
