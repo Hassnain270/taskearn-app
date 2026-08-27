@@ -40,7 +40,7 @@ try {
   auth = getAuth(app);
 }
 
-export { auth };
+export { auth, firebaseConfig };
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
 
