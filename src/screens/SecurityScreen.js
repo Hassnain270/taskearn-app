@@ -484,6 +484,11 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
+  // Checks for a duplicate email/phone happen HERE, before any OTP is
+  // sent — this way, if the value is already taken by another account,
+  // no email or SMS credit is spent finding that out. The same check is
+  // still repeated after OTP verification as a final safety net (e.g. in
+  // case two users somehow try the same value at nearly the same time).
   const handleUpdate = async () => {
     if (!validateInputs()) return;
 
@@ -504,11 +509,42 @@ export default function SecurityScreen({ navigation }) {
     }
 
     if (activeLayer === 'phone') {
+      const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
+      setOtpSending(true);
+      try {
+        const checkPhoneAvailable = httpsCallable(functionsInstance, 'checkNewPhoneAvailable');
+        await checkPhoneAvailable({ phone: fullPhone });
+      } catch (err) {
+        setOtpSending(false);
+        if (err.code === 'functions/already-exists' || err.message?.includes('already linked to another account')) {
+          showAlert("Phone Number Unavailable", "This phone number is already linked to another account. Please use a different number.");
+        } else {
+          showAlert("Error", err.message || "Failed to check phone availability.");
+        }
+        return;
+      }
+      setOtpSending(false);
       await sendPhoneChangeEmailOtp();
       return;
     }
 
     if (activeLayer === 'email') {
+      const cleanEmail = newEmail.trim().toLowerCase();
+      setOtpSending(true);
+      try {
+        const checkAvailable = httpsCallable(functionsInstance, 'checkNewEmailAvailable');
+        await checkAvailable({ email: cleanEmail });
+      } catch (err) {
+        setOtpSending(false);
+        if (err.code === 'functions/already-exists' || err.message?.includes('already linked to another account')) {
+          showAlert("Email Unavailable", "This email address is already linked to another account. Please use a different email.");
+        } else {
+          showAlert("Error", err.message || "Failed to check email availability.");
+        }
+        return;
+      }
+      setOtpSending(false);
+
       if (Platform.OS === 'web') {
         await sendEmailChangePhoneOtp();
       } else {
@@ -572,8 +608,8 @@ export default function SecurityScreen({ navigation }) {
 
         const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
 
-        // Must confirm no OTHER account already has this phone number
-        // BEFORE saving it — this check was previously missing entirely.
+        // Final safety-net check (the primary check already happened
+        // before the OTP was sent).
         const checkPhoneAvailable = httpsCallable(functionsInstance, 'checkNewPhoneAvailable');
         await checkPhoneAvailable({ phone: fullPhone });
 
@@ -613,8 +649,8 @@ export default function SecurityScreen({ navigation }) {
 
       const cleanEmail = newEmail.trim().toLowerCase();
 
-      // Must confirm no OTHER account already has this email BEFORE
-      // touching Firebase Auth.
+      // Final safety-net check (the primary check already happened
+      // before the SMS OTP was sent).
       const checkAvailable = httpsCallable(functionsInstance, 'checkNewEmailAvailable');
       await checkAvailable({ email: cleanEmail });
 
