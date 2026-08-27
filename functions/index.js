@@ -87,6 +87,43 @@ const VIP_TIERS = [
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MASTER_REFERRAL_CODES = ["ADMIN1", "123456", "MASTER"];
 
+// ============================================
+// CENTRAL BONUS-RATES CONFIG — single source of truth for every
+// percentage used across the app (welcome bonus, referral bonuses, VIP
+// upgrade bonus, daily task profit rate). Stored in Firestore at
+// config/bonusRates so it can be changed from one place, by an admin,
+// without editing or redeploying any code. If the document does not
+// exist yet, these defaults are used (matching the original hardcoded
+// values), and the document is created automatically the first time
+// updateBonusConfig is called.
+// ============================================
+const DEFAULT_BONUS_RATES = {
+  welcomeBonusRate: 0.07,
+  directReferralRate: 0.10,
+  indirectReferralRate: 0.05,
+  vipUpgradeRate: 0.05,
+  dailyTaskProfitRate: 0.0032,
+};
+
+async function getBonusRates(db) {
+  try {
+    const snap = await db.collection("config").doc("bonusRates").get();
+    if (snap.exists) {
+      const data = snap.data();
+      return {
+        welcomeBonusRate: typeof data.welcomeBonusRate === "number" ? data.welcomeBonusRate : DEFAULT_BONUS_RATES.welcomeBonusRate,
+        directReferralRate: typeof data.directReferralRate === "number" ? data.directReferralRate : DEFAULT_BONUS_RATES.directReferralRate,
+        indirectReferralRate: typeof data.indirectReferralRate === "number" ? data.indirectReferralRate : DEFAULT_BONUS_RATES.indirectReferralRate,
+        vipUpgradeRate: typeof data.vipUpgradeRate === "number" ? data.vipUpgradeRate : DEFAULT_BONUS_RATES.vipUpgradeRate,
+        dailyTaskProfitRate: typeof data.dailyTaskProfitRate === "number" ? data.dailyTaskProfitRate : DEFAULT_BONUS_RATES.dailyTaskProfitRate,
+      };
+    }
+  } catch (e) {
+    console.error("Error reading bonus config, using defaults:", e);
+  }
+  return DEFAULT_BONUS_RATES;
+}
+
 function calculateVipLockedCapital(balance) {
   for (const tier of VIP_TIERS) {
     if (balance >= tier.minCapital) return tier.minCapital;
@@ -778,6 +815,7 @@ exports.generateBEP20Address = onCall(
 
 async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) {
   const userRef = db.collection("users").doc(userId);
+  const rates = await getBonusRates(db);
 
   await db.runTransaction(async (transaction) => {
     const depositDoc = await transaction.get(depositDocRef);
@@ -794,7 +832,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const isFirstDeposit = !userData.hasDeposited;
     let welcomeBonusAmount = 0;
     if (isFirstDeposit) {
-      welcomeBonusAmount = Number((depositAmount * 0.07).toFixed(2));
+      welcomeBonusAmount = Number((depositAmount * rates.welcomeBonusRate).toFixed(2));
     }
 
     const finalUserBalance = Number((newBalance + welcomeBonusAmount).toFixed(2));
@@ -852,13 +890,13 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
         type: "WELCOME_BONUS",
         amount: welcomeBonusAmount,
         status: "approved",
-        title: "Welcome Bonus (7%)",
+        title: `Welcome Bonus (${(rates.welcomeBonusRate * 100).toFixed(0)}%)`,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
 
     if (level1Doc && level1Doc.exists) {
-      const directBonus = Number((baseVipCapital * 0.10).toFixed(2));
+      const directBonus = Number((baseVipCapital * rates.directReferralRate).toFixed(2));
       const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
 
       transaction.update(level1Ref, {
@@ -876,13 +914,13 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
         amount: directBonus,
         fromUserId: userId,
         status: "approved",
-        title: "Direct Referral Bonus (10%)",
+        title: `Direct Referral Bonus (${(rates.directReferralRate * 100).toFixed(0)}%)`,
         baseCapital: baseVipCapital,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       if (level2Doc && level2Doc.exists) {
-        const indirectBonus = Number((baseVipCapital * 0.05).toFixed(2));
+        const indirectBonus = Number((baseVipCapital * rates.indirectReferralRate).toFixed(2));
         const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
 
         transaction.update(level2Ref, {
@@ -900,7 +938,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
           amount: indirectBonus,
           fromUserId: userId,
           status: "approved",
-          title: "Indirect Referral Bonus (5%)",
+          title: `Indirect Referral Bonus (${(rates.indirectReferralRate * 100).toFixed(0)}%)`,
           baseCapital: baseVipCapital,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -1100,6 +1138,7 @@ exports.completeTask = onCall(async (request) => {
   const userId = request.auth.uid;
   const db = admin.firestore();
   const userRef = db.collection("users").doc(userId);
+  const rates = await getBonusRates(db);
 
   try {
     let calculatedProfit = 0;
@@ -1134,7 +1173,7 @@ exports.completeTask = onCall(async (request) => {
         throw new HttpsError("resource-exhausted", "Daily task limit reached (5/5).");
       }
 
-      calculatedProfit = Number((currentBalance * 0.0032).toFixed(2));
+      calculatedProfit = Number((currentBalance * rates.dailyTaskProfitRate).toFixed(2));
       let updatedBalance = Number((currentBalance + calculatedProfit).toFixed(2));
       const updatedTodayEarnings = Number((todayEarnings + calculatedProfit).toFixed(2));
       const updatedTotalEarnings = Number(((userData.totalEarnings || 0) + calculatedProfit).toFixed(2));
@@ -1154,7 +1193,7 @@ exports.completeTask = onCall(async (request) => {
           const capitalDifference = currentTier.minCapital - previousCapital;
 
           if (capitalDifference > 0) {
-            upgradeBonusGiven = Number((capitalDifference * 0.05).toFixed(2));
+            upgradeBonusGiven = Number((capitalDifference * rates.vipUpgradeRate).toFixed(2));
             updatedBalance = Number((updatedBalance + upgradeBonusGiven).toFixed(2));
 
             const bonusRecordRef = userRef.collection("bonuses").doc();
@@ -1174,7 +1213,7 @@ exports.completeTask = onCall(async (request) => {
               type: "VIP_UPGRADE_BONUS",
               amount: upgradeBonusGiven,
               status: "approved",
-              title: `VIP ${currentTier.id} Upgrade Bonus (5%)`,
+              title: `VIP ${currentTier.id} Upgrade Bonus (${(rates.vipUpgradeRate * 100).toFixed(0)}%)`,
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
           }
@@ -1405,11 +1444,7 @@ exports.resetUserPassword = onCall(async (request) => {
 });
 
 // ============================================
-// Prevents an email address from being assigned to more than one account
-// during "Change Email" — this check was previously missing, which
-// allowed a new email to be saved to Firestore even if it already
-// belonged to a different existing user, corrupting login lookups for
-// both accounts.
+// DUPLICATE EMAIL / PHONE CHECKS (used before Security screen changes)
 // ============================================
 exports.checkNewEmailAvailable = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
@@ -1428,11 +1463,6 @@ exports.checkNewEmailAvailable = onCall(async (request) => {
   return { success: true, available: true };
 });
 
-// ============================================
-// Same protection as checkNewEmailAvailable, but for phone numbers —
-// prevents a phone number from being assigned to more than one account
-// during "Change Phone Number".
-// ============================================
 exports.checkNewPhoneAvailable = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
@@ -1448,6 +1478,60 @@ exports.checkNewPhoneAvailable = onCall(async (request) => {
   }
 
   return { success: true, available: true };
+});
+
+// ============================================
+// BONUS CONFIG — read/update the central bonus-rates document.
+// getBonusConfig: any logged-in user can read current rates (so the app
+// can always display the true, current percentage anywhere it's shown).
+// updateBonusConfig: admin-only, changes one or more rates. Uses merge,
+// so it also creates the config/bonusRates document automatically the
+// very first time it's called.
+// ============================================
+exports.getBonusConfig = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const rates = await getBonusRates(db);
+  return { success: true, rates };
+});
+
+exports.updateBonusConfig = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may update bonus rates.");
+  }
+
+  const { welcomeBonusRate, directReferralRate, indirectReferralRate, vipUpgradeRate, dailyTaskProfitRate } = request.data || {};
+  const updates = {};
+
+  const validateRate = (name, value, max) => {
+    if (value === undefined) return;
+    if (typeof value !== "number" || isNaN(value) || value < 0 || value > max) {
+      throw new HttpsError("invalid-argument", `${name} must be a number between 0 and ${max}.`);
+    }
+    updates[name] = value;
+  };
+
+  validateRate("welcomeBonusRate", welcomeBonusRate, 1);
+  validateRate("directReferralRate", directReferralRate, 1);
+  validateRate("indirectReferralRate", indirectReferralRate, 1);
+  validateRate("vipUpgradeRate", vipUpgradeRate, 1);
+  validateRate("dailyTaskProfitRate", dailyTaskProfitRate, 0.1);
+
+  if (Object.keys(updates).length === 0) {
+    throw new HttpsError("invalid-argument", "No valid rate fields were provided.");
+  }
+
+  updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+  updates.updatedBy = request.auth.uid;
+
+  await db.collection("config").doc("bonusRates").set(updates, { merge: true });
+
+  const newRates = await getBonusRates(db);
+  return { success: true, rates: newRates };
 });
 
 // ============================================

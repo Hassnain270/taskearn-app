@@ -237,7 +237,7 @@ export default function SecurityScreen({ navigation }) {
   const [newEmail, setNewEmail] = useState('');
 
   const [countryModalVisible, setCountryModalVisible] = useState(false);
-  const [selectedCountry, setSelectedCountry] = useState({ code: 'PK', name: 'Pakistan', dial_code: '+92', minLen: 10, maxLen: 10 });
+  const [selectedCountry, setSelectedCountry] = useState({ code: 'US', name: 'United States', dial_code: '+1', minLen: 10, maxLen: 10 });
   const [searchQuery, setSearchQuery] = useState('');
 
   const [loading, setLoading] = useState(false);
@@ -484,11 +484,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Checks for a duplicate email/phone happen HERE, before any OTP is
-  // sent — this way, if the value is already taken by another account,
-  // no email or SMS credit is spent finding that out. The same check is
-  // still repeated after OTP verification as a final safety net (e.g. in
-  // case two users somehow try the same value at nearly the same time).
   const handleUpdate = async () => {
     if (!validateInputs()) return;
 
@@ -608,8 +603,6 @@ export default function SecurityScreen({ navigation }) {
 
         const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
 
-        // Final safety-net check (the primary check already happened
-        // before the OTP was sent).
         const checkPhoneAvailable = httpsCallable(functionsInstance, 'checkNewPhoneAvailable');
         await checkPhoneAvailable({ phone: fullPhone });
 
@@ -649,8 +642,6 @@ export default function SecurityScreen({ navigation }) {
 
       const cleanEmail = newEmail.trim().toLowerCase();
 
-      // Final safety-net check (the primary check already happened
-      // before the SMS OTP was sent).
       const checkAvailable = httpsCallable(functionsInstance, 'checkNewEmailAvailable');
       await checkAvailable({ email: cleanEmail });
 
