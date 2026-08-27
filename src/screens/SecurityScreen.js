@@ -16,9 +16,8 @@ import {
   KeyboardAvoidingView
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { RecaptchaVerifier, PhoneAuthProvider } from 'firebase/auth';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import { auth, db, firebaseConfig } from '../firebaseConfig';
+import { RecaptchaVerifier } from 'firebase/auth';
+import { auth, db } from '../firebaseConfig';
 import {
   updatePassword,
   updateEmail,
@@ -29,6 +28,7 @@ import {
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
+import PhoneVerifyBridge from '../components/PhoneVerifyBridge';
 import { ThemeContext } from '../../ThemeContext';
 
 const functionsInstance = getFunctions();
@@ -208,9 +208,6 @@ const ALL_COUNTRIES = [
 
 const ALLOWED_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com'];
 
-// Alert.alert renders nothing visible on web (react-native-web has no UI
-// implementation for it) — every alert in this screen must go through this
-// cross-platform wrapper instead, or failures on web are completely silent.
 const showAlert = (title, message, buttons) => {
   if (Platform.OS === 'web') {
     if (buttons && buttons.length > 0) {
@@ -248,7 +245,6 @@ export default function SecurityScreen({ navigation }) {
   const [currentPhone, setCurrentPhone] = useState('Not Set');
   const [currentEmail, setCurrentEmail] = useState('Not Set');
 
-  // Email-OTP flow (Password change, and the identity-confirmation step of Phone change)
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpVerifying, setOtpVerifying] = useState(false);
@@ -257,24 +253,22 @@ export default function SecurityScreen({ navigation }) {
   const [canResendOtp, setCanResendOtp] = useState(false);
   const otpIntervalRef = useRef(null);
 
-  // Phone-OTP flow — used for: (a) verifying the CURRENT phone during an
-  // Email change, and (b) verifying the NEW phone during a Phone change.
+  // Web-only phone-OTP flow (direct RecaptchaVerifier)
   const [phoneOtpStep, setPhoneOtpStep] = useState(false);
   const [phoneOtpCode, setPhoneOtpCode] = useState('');
   const [phoneVerificationId, setPhoneVerificationId] = useState('');
 
-  const nativeRecaptchaRef = useRef(null);
+  // Native-only: shows the WebView bridge for phone verification
+  const [bridgeVisible, setBridgeVisible] = useState(false);
+
   const webVerifierWrapperRef = useRef(null);
 
   const getRecaptchaVerifierRef = () => {
-    if (Platform.OS === 'web') {
-      if (!webVerifierWrapperRef.current) {
-        const verifierInstance = new RecaptchaVerifier(auth, 'security-phone-recaptcha', { size: 'invisible' });
-        webVerifierWrapperRef.current = { current: verifierInstance };
-      }
-      return webVerifierWrapperRef.current;
+    if (!webVerifierWrapperRef.current) {
+      const verifierInstance = new RecaptchaVerifier(auth, 'security-phone-recaptcha', { size: 'invisible' });
+      webVerifierWrapperRef.current = { current: verifierInstance };
     }
-    return nativeRecaptchaRef;
+    return webVerifierWrapperRef.current;
   };
 
   useEffect(() => {
@@ -339,6 +333,7 @@ export default function SecurityScreen({ navigation }) {
     setPhoneOtpStep(false);
     setPhoneOtpCode('');
     setPhoneVerificationId('');
+    setBridgeVisible(false);
     stopOtpTimer();
     setModalVisible(true);
   };
@@ -350,6 +345,7 @@ export default function SecurityScreen({ navigation }) {
     setPhoneOtpStep(false);
     setPhoneOtpCode('');
     setPhoneVerificationId('');
+    setBridgeVisible(false);
     stopOtpTimer();
   };
 
@@ -435,14 +431,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Real Firebase-side verification of a phone credential, whether or not
-  // this phone was ever linked before:
-  // - First time this phone is verified for this account -> linkWithCredential
-  //   (validates the code AND permanently ties the number to this UID).
-  // - Already linked from before -> Firebase rejects a second link with
-  //   'auth/provider-already-linked'; fall back to reauthenticateWithCredential
-  //   (still validates the code against Firebase's servers, and refreshes
-  //   the session's "recent login" status).
   const verifyAndBindPhoneCredential = async (credential) => {
     const user = auth.currentUser;
     try {
@@ -462,7 +450,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // --- PHONE change: Step 1) confirm identity via EMAIL OTP ---
   const sendPhoneChangeEmailOtp = async () => {
     setOtpSending(true);
     try {
@@ -478,7 +465,8 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // --- PHONE change: Step 2) verify + bind the NEW phone number via SMS ---
+  // Web: sends SMS directly via RecaptchaVerifier. Native: this isn't
+  // called — the bridge (WebView) is opened instead.
   const sendPhoneLinkOtp = async () => {
     setOtpSending(true);
     try {
@@ -500,7 +488,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // --- EMAIL change: verify the CURRENT registered phone via SMS ---
   const sendEmailChangePhoneOtp = async () => {
     setOtpSending(true);
     try {
@@ -546,7 +533,11 @@ export default function SecurityScreen({ navigation }) {
     }
 
     if (activeLayer === 'email') {
-      await sendEmailChangePhoneOtp();
+      if (Platform.OS === 'web') {
+        await sendEmailChangePhoneOtp();
+      } else {
+        setBridgeVisible(true);
+      }
       return;
     }
   };
@@ -605,11 +596,15 @@ export default function SecurityScreen({ navigation }) {
         const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
         await verifyOtp({ email: user.email, code: otpCode, purpose: 'PHONE_CHANGE' });
 
-        // Identity confirmed via email — now verify + bind the NEW phone itself.
         setOtpStep(false);
         setOtpCode('');
         stopOtpTimer();
-        await sendPhoneLinkOtp();
+
+        if (Platform.OS === 'web') {
+          await sendPhoneLinkOtp();
+        } else {
+          setBridgeVisible(true);
+        }
       }
     } catch (err) {
       if (err.code === 'auth/requires-recent-login') {
@@ -622,8 +617,7 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Verifies the SMS code for whichever flow is active and, on success,
-  // completes that flow (email change or phone change).
+  // Web-only: verifies the SMS code entered directly on this screen.
   const handleVerifyPhoneOtp = async () => {
     if (phoneOtpCode.length !== 6) {
       showAlert("Invalid Code", "Please enter the 6-digit code.");
@@ -669,6 +663,25 @@ export default function SecurityScreen({ navigation }) {
       }
     } finally {
       setOtpVerifying(false);
+    }
+  };
+
+  // Native-only: called when the WebView bridge reports success. The
+  // actual Firebase Auth + Firestore update already happened inside the
+  // WebView's own signed-in session — this just syncs local UI state.
+  const handleBridgeResult = (data) => {
+    setBridgeVisible(false);
+
+    if (data.purpose === 'email_change') {
+      const cleanEmail = newEmail.trim().toLowerCase();
+      setCurrentEmail(cleanEmail);
+      closeModal();
+      forceReLogin("Your email address has been changed and verified successfully via your phone number. For your security, please log in again with your new email.");
+    } else if (data.purpose === 'phone_change') {
+      const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
+      setCurrentPhone(fullPhone);
+      closeModal();
+      showAlert("Success", "Phone number verified and updated successfully!");
     }
   };
 
@@ -868,7 +881,7 @@ export default function SecurityScreen({ navigation }) {
                 </View>
               )}
 
-              {((activeLayer === 'email') || (activeLayer === 'phone')) && phoneOtpStep && (
+              {Platform.OS === 'web' && ((activeLayer === 'email') || (activeLayer === 'phone')) && phoneOtpStep && (
                 <View style={styles.formContainer}>
                   <Text style={styles.currentActiveLabel}>
                     We sent a 6-digit code via SMS to {activeLayer === 'email' ? currentPhone : `${selectedCountry.dial_code}${newPhone}`}
@@ -896,6 +909,8 @@ export default function SecurityScreen({ navigation }) {
                 </View>
               )}
 
+              {Platform.OS !== 'web' && ((activeLayer === 'email' && !phoneOtpStep && !otpStep) || (activeLayer === 'phone' && otpStep === false && phoneOtpStep === false)) ? null : null}
+
               <View style={styles.modalActions}>
                 {((activeLayer === 'password' || activeLayer === 'phone') && otpStep) ? (
                   <>
@@ -910,7 +925,7 @@ export default function SecurityScreen({ navigation }) {
                       )}
                     </TouchableOpacity>
                   </>
-                ) : (((activeLayer === 'email') || (activeLayer === 'phone')) && phoneOtpStep) ? (
+                ) : (Platform.OS === 'web' && ((activeLayer === 'email') || (activeLayer === 'phone')) && phoneOtpStep) ? (
                   <>
                     <TouchableOpacity style={styles.cancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
                       <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -991,12 +1006,20 @@ export default function SecurityScreen({ navigation }) {
         </View>
       </Modal>
 
-      {Platform.OS === 'web' ? (
+      {Platform.OS === 'web' && (
         <View nativeID="security-phone-recaptcha" />
-      ) : (
-        <FirebaseRecaptchaVerifierModal
-          ref={nativeRecaptchaRef}
-          firebaseConfig={firebaseConfig}
+      )}
+
+      {Platform.OS !== 'web' && (
+        <PhoneVerifyBridge
+          visible={bridgeVisible}
+          purpose={activeLayer === 'email' ? 'email_change' : 'phone_change'}
+          phone={currentPhone}
+          newEmail={newEmail.trim().toLowerCase()}
+          newPhone={newPhone}
+          dialCode={selectedCountry.dial_code}
+          onResult={handleBridgeResult}
+          onClose={() => setBridgeVisible(false)}
         />
       )}
 
