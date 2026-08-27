@@ -20,7 +20,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
+
+const functionsInstance = getFunctions();
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -142,11 +145,12 @@ const generateRandomTickerText = () => {
   }).join(" • ");
 };
 
-const bannerData = [
-  { id: 1, title: "Invite Friends & Team Commission", desc: "Get 10% instant commission on Level 1 direct members and 5% recurring bonus on Level 2 indirect team task completions.", icon: "account-multiple-plus", color: "#10B981" },
-  { id: 2, title: "Daily Task Reward Model", desc: "Complete exactly 5 orders daily to qualify for profit settlement. Higher VIPs unlock bigger profits.", icon: "clipboard-check", color: "#3B82F6" },
-  { id: 3, title: "Sign-Up Bonus Promo", desc: "Exclusive 7% balance bonus on your first-ever deposit. Boost your trading capital instantly.", icon: "gift", color: "#EAB308" }
-];
+// Formats a decimal rate (e.g. 0.10) as a clean percentage string (e.g.
+// "10") without unnecessary trailing zeros for non-round rates.
+const formatPercent = (rate) => {
+  const value = rate * 100;
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+};
 
 export default function HomeScreen({ navigation, route }) {
   const { isDarkMode, toggleTheme } = useContext(ThemeContext);
@@ -167,6 +171,18 @@ export default function HomeScreen({ navigation, route }) {
   const [textWidth, setTextWidth] = useState(0);
   const bannerRef = useRef(null);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+
+  // Defaults match the standard rates while the real values load from the
+  // central config, so the banners never show blank/zero percentages.
+  const [directReferralRate, setDirectReferralRate] = useState(0.10);
+  const [indirectReferralRate, setIndirectReferralRate] = useState(0.05);
+  const [welcomeBonusRate, setWelcomeBonusRate] = useState(0.07);
+
+  const bannerData = [
+    { id: 1, title: "Invite Friends & Team Commission", desc: `Get ${formatPercent(directReferralRate)}% instant commission on Level 1 direct members and ${formatPercent(indirectReferralRate)}% recurring bonus on Level 2 indirect team task completions.`, icon: "account-multiple-plus", color: "#10B981" },
+    { id: 2, title: "Daily Task Reward Model", desc: "Complete exactly 5 orders daily to qualify for profit settlement. Higher VIPs unlock bigger profits.", icon: "clipboard-check", color: "#3B82F6" },
+    { id: 3, title: "Sign-Up Bonus Promo", desc: `Exclusive ${formatPercent(welcomeBonusRate)}% balance bonus on your first-ever deposit. Boost your trading capital instantly.`, icon: "gift", color: "#EAB308" }
+  ];
 
   const getLiveVipLevel = (currentBalance) => {
     if (currentBalance >= 20000.0) return "VIP 10";
@@ -210,6 +226,24 @@ export default function HomeScreen({ navigation, route }) {
 
   useEffect(() => {
     setCombinedTickerText(generateRandomTickerText());
+  }, []);
+
+  useEffect(() => {
+    const loadBonusRates = async () => {
+      try {
+        const getBonusConfig = httpsCallable(functionsInstance, 'getBonusConfig');
+        const res = await getBonusConfig();
+        const rates = res.data?.rates;
+        if (rates) {
+          if (typeof rates.directReferralRate === 'number') setDirectReferralRate(rates.directReferralRate);
+          if (typeof rates.indirectReferralRate === 'number') setIndirectReferralRate(rates.indirectReferralRate);
+          if (typeof rates.welcomeBonusRate === 'number') setWelcomeBonusRate(rates.welcomeBonusRate);
+        }
+      } catch (err) {
+        // Keep default rates if this fails — never block the screen.
+      }
+    };
+    loadBonusRates();
   }, []);
 
   useEffect(() => {
