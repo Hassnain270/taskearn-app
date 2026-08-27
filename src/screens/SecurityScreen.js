@@ -571,6 +571,12 @@ export default function SecurityScreen({ navigation }) {
         await verifyOtp({ email: user.email, code: otpCode, purpose: 'PHONE_CHANGE' });
 
         const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
+
+        // Must confirm no OTHER account already has this phone number
+        // BEFORE saving it — this check was previously missing entirely.
+        const checkPhoneAvailable = httpsCallable(functionsInstance, 'checkNewPhoneAvailable');
+        await checkPhoneAvailable({ phone: fullPhone });
+
         await updateDoc(doc(db, 'users', user.uid), { phoneNumber: fullPhone });
         setCurrentPhone(fullPhone);
 
@@ -578,7 +584,9 @@ export default function SecurityScreen({ navigation }) {
         showAlert("Success", "Phone number updated successfully!");
       }
     } catch (err) {
-      if (err.code === 'auth/requires-recent-login') {
+      if (err.code === 'functions/already-exists' || err.message?.includes('already linked to another account')) {
+        showAlert("Phone Number Unavailable", "This phone number is already linked to another account. Please use a different number.");
+      } else if (err.code === 'auth/requires-recent-login') {
         showAlert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
       } else {
         showAlert("Verification Failed", err.message || "The code entered is invalid or has expired.");
@@ -606,8 +614,7 @@ export default function SecurityScreen({ navigation }) {
       const cleanEmail = newEmail.trim().toLowerCase();
 
       // Must confirm no OTHER account already has this email BEFORE
-      // touching Firebase Auth — this was the missing check that let a
-      // duplicate email get saved to Firestore, corrupting login lookups.
+      // touching Firebase Auth.
       const checkAvailable = httpsCallable(functionsInstance, 'checkNewEmailAvailable');
       await checkAvailable({ email: cleanEmail });
 
