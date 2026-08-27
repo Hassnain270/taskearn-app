@@ -299,6 +299,16 @@ export default function SettlementConfigScreen({ navigation }) {
             </Text>
           </View>
 
+          <View style={currentStyles.pendingWarningBox}>
+            <View style={styles.alertHeaderRow}>
+              <MaterialCommunityIcons name="alert-outline" size={20} color="#F59E0B" />
+              <Text style={currentStyles.pendingWarningTitle}>If You Have a Pending Withdrawal</Text>
+            </View>
+            <Text style={currentStyles.pendingWarningText}>
+              We recommend not changing your wallet address while a withdrawal request is still pending. Any pending withdrawal will be settled to the address that was on file at the time it was submitted — updating your address now will not affect it. The new address will only apply to withdrawal requests submitted after this change.
+            </Text>
+          </View>
+
           <View style={styles.inputGroup}>
             <Text style={currentStyles.inputLabel}>SELECT BLOCKCHAIN NETWORK</Text>
             <View style={styles.networkSelectorRow}>
@@ -442,9 +452,12 @@ const lightStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#1E293B', fontStyle: 'italic' },
-  alertBox: { backgroundColor: '#E6F4EA', borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: '#A3E635' },
+  alertBox: { backgroundColor: '#E6F4EA', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#A3E635' },
   alertTitle: { fontSize: 14, fontWeight: '700', color: '#059669' },
   alertDescription: { fontSize: 11, color: '#475569', lineHeight: 16, fontWeight: '500' },
+  pendingWarningBox: { backgroundColor: '#FFFBEB', borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: '#FDE68A' },
+  pendingWarningTitle: { fontSize: 14, fontWeight: '700', color: '#B45309' },
+  pendingWarningText: { fontSize: 11, color: '#92400E', lineHeight: 16, fontWeight: '500' },
   inputLabel: { fontSize: 10, fontWeight: '700', color: '#64748B', letterSpacing: 0.8, marginBottom: 10, paddingLeft: 4 },
   networkButton: { flex: 1, height: 48, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   activeNetworkButton: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6' },
@@ -466,9 +479,12 @@ const darkStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#161B22', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF', fontStyle: 'italic' },
-  alertBox: { backgroundColor: '#062018', borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: '#059669' },
+  alertBox: { backgroundColor: '#062018', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#059669' },
   alertTitle: { fontSize: 14, fontWeight: '700', color: '#34D399' },
   alertDescription: { fontSize: 11, color: '#A7F3D0', lineHeight: 16, fontWeight: '500' },
+  pendingWarningBox: { backgroundColor: '#2A1F05', borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: '#92400E' },
+  pendingWarningTitle: { fontSize: 14, fontWeight: '700', color: '#FBBF24' },
+  pendingWarningText: { fontSize: 11, color: '#FDE68A', lineHeight: 16, fontWeight: '500' },
   inputLabel: { fontSize: 10, fontWeight: '700', color: '#CBD5E1', letterSpacing: 0.8, marginBottom: 10, paddingLeft: 4 },
   networkButton: { flex: 1, height: 48, backgroundColor: '#161B22', borderWidth: 1, borderColor: '#30363D', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   activeNetworkButton: { backgroundColor: '#1E293B', borderColor: '#3B82F6' },
