@@ -1477,3 +1477,22 @@ exports.chatWithSupportAI = onCall(
     }
   }
 );
+
+// ============================================
+// WEBVIEW SESSION PASS — lets the Android app open a small in-app browser
+// window that is already logged in as the SAME user, so it can use the
+// phone-verification page (which only works reliably as a full web page).
+// ============================================
+exports.issueWebViewSessionToken = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "User must be logged in.");
+  }
+
+  try {
+    const customToken = await admin.auth().createCustomToken(request.auth.uid);
+    return { success: true, token: customToken };
+  } catch (error) {
+    console.error("Error issuing WebView session token:", error);
+    throw new HttpsError("internal", "Failed to prepare secure session.");
+  }
+});
