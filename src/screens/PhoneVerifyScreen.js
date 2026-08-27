@@ -137,13 +137,14 @@ export default function PhoneVerifyScreen({ route }) {
       }
 
       if (purpose === 'email_change') {
+        // Must confirm no OTHER account already has this email BEFORE
+        // touching Firebase Auth.
+        const checkAvailable = httpsCallable(functionsInstance, 'checkNewEmailAvailable');
+        await checkAvailable({ email: newEmail });
+
         await verifyAndBindPhoneCredential(credential);
 
         const user = auth.currentUser;
-        // Firebase no longer allows changing email directly — it now
-        // requires the NEW email to be verified via a link Firebase sends
-        // to it. The actual change only takes effect once that link is
-        // clicked; until then, the account's login email stays the old one.
         await verifyBeforeUpdateEmail(user, newEmail);
         await updateDoc(doc(db, 'users', user.uid), { email: newEmail });
 
@@ -155,7 +156,9 @@ export default function PhoneVerifyScreen({ route }) {
       throw new Error('Unknown verification purpose.');
     } catch (err) {
       setStatus('awaiting_code');
-      if (err.code === 'auth/invalid-verification-code') {
+      if (err.code === 'functions/already-exists' || err.message?.includes('already linked to another account')) {
+        setErrorMsg('This email address is already linked to another account. Please go back and use a different email.');
+      } else if (err.code === 'auth/invalid-verification-code') {
         setErrorMsg('Incorrect code. Please try again.');
       } else if (err.code === 'auth/code-expired') {
         setErrorMsg('This code has expired. Please request a new one.');
