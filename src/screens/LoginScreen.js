@@ -16,12 +16,17 @@ import {
   ScrollView
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { auth, db } from '../firebaseConfig';
+import { RecaptchaVerifier } from 'firebase/auth';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { auth, db, firebaseConfig } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
 
 const functionsInstance = getFunctions();
+
+const MAX_EMAIL_ATTEMPTS_BEFORE_PHONE_FALLBACK = 5;
 
 const showAlert = (title, message, buttons) => {
   if (Platform.OS === 'web') {
@@ -55,9 +60,29 @@ export default function LoginScreen({ navigation }) {
 
   const [userData, setUserData] = useState(null);
 
+  // Email-OTP attempt tracking -> after enough attempts, offer phone fallback
+  const [emailAttemptCount, setEmailAttemptCount] = useState(0);
+  const [phoneOtpMode, setPhoneOtpMode] = useState(false);
+  const [phoneVerificationId, setPhoneVerificationId] = useState('');
+
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
   const intervalRef = useRef(null);
+
+  // reCAPTCHA verifiers for phone OTP (web + native)
+  const nativeRecaptchaRef = useRef(null);
+  const webVerifierWrapperRef = useRef(null);
+
+  const getRecaptchaVerifierRef = () => {
+    if (Platform.OS === 'web') {
+      if (!webVerifierWrapperRef.current) {
+        const verifierInstance = new RecaptchaVerifier(auth, 'login-phone-recaptcha', { size: 'invisible' });
+        webVerifierWrapperRef.current = { current: verifierInstance };
+      }
+      return webVerifierWrapperRef.current;
+    }
+    return nativeRecaptchaRef;
+  };
 
   useEffect(() => {
     if (forgetModalVisible && forgetStep === 2) {
@@ -105,8 +130,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // Same constraint as the Registration screen's username field: no spaces,
-  // maximum 12 characters.
   const handleUsernameChange = (text) => {
     const noSpaces = text.replace(/\s/g, '');
     if (noSpaces.length <= 12) {
@@ -187,12 +210,14 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      setUserData({ uid: resolved.uid, username: resolved.username, email: resolved.email });
+      setUserData({ uid: resolved.uid, username: resolved.username, email: resolved.email, phone: resolved.phone || null });
 
       const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
       await sendOtp({ purpose: 'FORGOT_PASSWORD', emailInput: resolved.email });
 
       setIsResetLoading(false);
+      setEmailAttemptCount(1);
+      setPhoneOtpMode(false);
       setForgetStep(2);
     } catch (error) {
       setIsResetLoading(false);
@@ -200,16 +225,64 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  const handleSwitchToPhoneOtp = async () => {
+    if (!userData?.phone) {
+      showAlert("No Phone on File", "This account does not have a registered phone number for recovery. Please contact support.");
+      return;
+    }
+
+    setIsResetLoading(true);
+    try {
+      const verifierRef = getRecaptchaVerifierRef();
+      const res = await sendSMSOTP(userData.phone, verifierRef);
+      setIsResetLoading(false);
+
+      if (res.success) {
+        setPhoneVerificationId(res.verificationId);
+        setPhoneOtpMode(true);
+        setOtpInput('');
+        startResendTimer();
+        showAlert("Code Sent", `A 6-digit code has been sent via SMS to ${userData.phone}.`);
+      } else {
+        showAlert("Error", res.message);
+      }
+    } catch (error) {
+      setIsResetLoading(false);
+      showAlert("Error", error.message || "Failed to send SMS code.");
+    }
+  };
+
   const handleResendOTP = async () => {
     if (!canResend || !userData) return;
 
     setIsResetLoading(true);
+
+    if (phoneOtpMode) {
+      try {
+        const verifierRef = getRecaptchaVerifierRef();
+        const res = await sendSMSOTP(userData.phone, verifierRef);
+        setIsResetLoading(false);
+        if (res.success) {
+          setPhoneVerificationId(res.verificationId);
+          showAlert("OTP Resent", "A new code has been sent via SMS.");
+          startResendTimer();
+        } else {
+          showAlert("Error", res.message);
+        }
+      } catch (error) {
+        setIsResetLoading(false);
+        showAlert("Error", error.message || "Failed to resend the SMS code.");
+      }
+      return;
+    }
+
     try {
       const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
       await sendOtp({ purpose: 'FORGOT_PASSWORD', emailInput: userData.email });
       setIsResetLoading(false);
-      startResendTimer();
+      setEmailAttemptCount((prev) => prev + 1);
       showAlert("OTP Resent", "A new verification code has been sent to your email.");
+      startResendTimer();
     } catch (error) {
       setIsResetLoading(false);
       showAlert("Error", error.message || "Failed to resend the code.");
@@ -223,6 +296,23 @@ export default function LoginScreen({ navigation }) {
     }
 
     setIsResetLoading(true);
+
+    if (phoneOtpMode) {
+      try {
+        const result = await verifySMSOTP(phoneVerificationId, otpInput);
+        setIsResetLoading(false);
+        if (result.success) {
+          setForgetStep(3);
+        } else {
+          showAlert("Error", result.message);
+        }
+      } catch (error) {
+        setIsResetLoading(false);
+        showAlert("Error", error.message || "Verification failed.");
+      }
+      return;
+    }
+
     try {
       const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
       await verifyOtp({ email: userData.email, code: otpInput, purpose: 'FORGOT_PASSWORD' });
@@ -263,6 +353,9 @@ export default function LoginScreen({ navigation }) {
     setNewPassword('');
     setUserData(null);
     setIsResetLoading(false);
+    setEmailAttemptCount(0);
+    setPhoneOtpMode(false);
+    setPhoneVerificationId('');
   };
 
   return (
@@ -402,7 +495,9 @@ export default function LoginScreen({ navigation }) {
               {forgetStep === 2 && (
                 <View style={styles.modalStepWrapper}>
                   <Text style={styles.modalLabel}>
-                    Enter the 6-digit code sent to {userData?.email}
+                    {phoneOtpMode
+                      ? `Enter the 6-digit code sent via SMS to ${userData?.phone}`
+                      : `Enter the 6-digit code sent to ${userData?.email}`}
                   </Text>
                   <View style={styles.modalInputWrapper}>
                     <MaterialCommunityIcons name="cellphone-key" size={20} color="#94A3B8" style={styles.inputIcon} />
@@ -426,6 +521,18 @@ export default function LoginScreen({ navigation }) {
                       <Text style={styles.resendDisabledText}>Resend OTP in 0:{timer < 10 ? `0${timer}` : timer}</Text>
                     )}
                   </View>
+
+                  {!phoneOtpMode && emailAttemptCount >= MAX_EMAIL_ATTEMPTS_BEFORE_PHONE_FALLBACK && userData?.phone && (
+                    <TouchableOpacity
+                      style={styles.phoneFallbackContainer}
+                      onPress={handleSwitchToPhoneOtp}
+                      disabled={isResetLoading}
+                    >
+                      <Text style={styles.phoneFallbackText}>
+                        Unable to receive the code? Send it to my phone instead
+                      </Text>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity 
                     style={[styles.modalBtn, isResetLoading && styles.disabledBtn]} 
@@ -490,6 +597,15 @@ export default function LoginScreen({ navigation }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {Platform.OS === 'web' ? (
+        <View nativeID="login-phone-recaptcha" />
+      ) : (
+        <FirebaseRecaptchaVerifierModal
+          ref={nativeRecaptchaRef}
+          firebaseConfig={firebaseConfig}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -522,9 +638,11 @@ const styles = StyleSheet.create({
   modalLabel: { fontSize: 13, fontWeight: '600', color: '#475569', marginBottom: 6 },
   modalInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, height: 50, marginBottom: 16 },
   modalInput: { flex: 1, color: '#1E293B', fontSize: 14, fontWeight: '500', height: '100%' },
-  timerContainer: { alignItems: 'center', marginBottom: 16, marginTop: -4 },
+  timerContainer: { alignItems: 'center', marginBottom: 12, marginTop: -4 },
   resendActiveText: { color: '#3B82F6', fontSize: 14, fontWeight: '700' },
   resendDisabledText: { color: '#94A3B8', fontSize: 14, fontWeight: '500' },
+  phoneFallbackContainer: { alignItems: 'center', marginBottom: 16, paddingVertical: 4 },
+  phoneFallbackText: { color: '#EF4444', fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' },
   modalBtn: { backgroundColor: '#3B82F6', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', width: '100%', elevation: 1 },
   modalBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   closeModalBtn: { marginTop: 16, padding: 4 },
