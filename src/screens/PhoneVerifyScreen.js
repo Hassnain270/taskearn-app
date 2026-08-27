@@ -14,23 +14,42 @@ import { auth, db } from '../firebaseConfig';
 
 const functionsInstance = getFunctions();
 
-// This page is only ever reached for two purposes now:
-// - "email_change": verifies the user's CURRENT registered phone before
-//   changing their email (Security screen).
-// - "forgot_password": the rare phone fallback in Login > Forgot Password,
-//   only offered after 5 failed email attempts.
-// ("phone_change" was removed — Phone Number changes now use Email OTP
-// only, no SMS at all, to conserve the monthly SMS quota.)
-
 const postResultToApp = (result) => {
   if (typeof window !== 'undefined' && window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify(result));
   }
 };
 
+// React Navigation's own linking-based param parsing isn't always reliable
+// for a fresh page load inside a native WebView (same issue RegisterScreen
+// works around for its "ref" param). As a robust fallback, this reads the
+// query string directly from the URL — checking window.location.search
+// first, then falling back to whatever follows "?" inside the hash
+// fragment (since our URLs look like "...#/phone-verify?purpose=...").
+const getUrlParam = (name) => {
+  if (typeof window === 'undefined' || !window.location) return null;
+  try {
+    let queryString = window.location.search || '';
+    if (!queryString && window.location.hash) {
+      const hashParts = window.location.hash.split('?');
+      if (hashParts.length > 1) {
+        queryString = '?' + hashParts.slice(1).join('?');
+      }
+    }
+    const params = new URLSearchParams(queryString);
+    return params.get(name);
+  } catch (e) {
+    return null;
+  }
+};
+
 export default function PhoneVerifyScreen({ route }) {
-  const params = route?.params || {};
-  const { purpose, token, phone, newEmail } = params;
+  const routeParams = route?.params || {};
+
+  const [purpose] = useState(routeParams.purpose || getUrlParam('purpose'));
+  const [token] = useState(routeParams.token || getUrlParam('token'));
+  const [phone] = useState(routeParams.phone || getUrlParam('phone'));
+  const [newEmail] = useState(routeParams.newEmail || getUrlParam('newEmail'));
 
   const [status, setStatus] = useState('signing_in');
   const [errorMsg, setErrorMsg] = useState('');
@@ -67,6 +86,11 @@ export default function PhoneVerifyScreen({ route }) {
     setStatus('sending');
     setErrorMsg('');
     try {
+      if (!phone) {
+        setStatus('error');
+        setErrorMsg('Missing phone number. Please go back and try again.');
+        return;
+      }
       if (!verifierRef.current) {
         verifierRef.current = new RecaptchaVerifier(auth, 'phone-verify-recaptcha', { size: 'invisible' });
       }
