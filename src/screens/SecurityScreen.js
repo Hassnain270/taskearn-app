@@ -16,10 +16,13 @@ import {
   KeyboardAvoidingView
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { auth, db } from '../firebaseConfig';
+import { RecaptchaVerifier } from 'firebase/auth';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { auth, db, firebaseConfig } from '../firebaseConfig';
 import { updatePassword, updateEmail, signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
 import { ThemeContext } from '../../ThemeContext';
 
 const functionsInstance = getFunctions();
@@ -166,7 +169,7 @@ const ALL_COUNTRIES = [
   { code: 'RW', name: 'Rwanda', dial_code: '+250', minLen: 9, maxLen: 9 },
   { code: 'SA', name: 'Saudi Arabia', dial_code: '+966', minLen: 9, maxLen: 9 },
   { code: 'SN', name: 'Senegal', dial_code: '+221', minLen: 9, maxLen: 9 },
-  { code: 'RS', name: 'Serbia', dial_code: '+381', minLen: 9, maxLen: 9 },
+  { code: 'RS', name: 'Serbia', dial_code: '+381', minLen: 8, maxLen: 9 },
   { code: 'SG', name: 'Singapore', dial_code: '+65', minLen: 8, maxLen: 8 },
   { code: 'SK', name: 'Slovakia', dial_code: '+421', minLen: 9, maxLen: 9 },
   { code: 'SI', name: 'Slovenia', dial_code: '+386', minLen: 8, maxLen: 8 },
@@ -220,6 +223,7 @@ export default function SecurityScreen({ navigation }) {
   const [currentPhone, setCurrentPhone] = useState('Not Set');
   const [currentEmail, setCurrentEmail] = useState('Not Set');
 
+  // Email-OTP flow (used for Password change, and now Phone change too)
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpVerifying, setOtpVerifying] = useState(false);
@@ -227,6 +231,27 @@ export default function SecurityScreen({ navigation }) {
   const [otpTimer, setOtpTimer] = useState(60);
   const [canResendOtp, setCanResendOtp] = useState(false);
   const otpIntervalRef = useRef(null);
+
+  // Phone-OTP flow (used only for Email change — sent to the REGISTERED phone)
+  const [phoneOtpStep, setPhoneOtpStep] = useState(false);
+  const [phoneOtpCode, setPhoneOtpCode] = useState('');
+  const [phoneVerificationId, setPhoneVerificationId] = useState('');
+
+  // reCAPTCHA verifiers — web uses firebase/auth's RecaptchaVerifier bound
+  // to a hidden DOM node; native uses expo-firebase-recaptcha's modal.
+  const nativeRecaptchaRef = useRef(null);
+  const webVerifierWrapperRef = useRef(null);
+
+  const getRecaptchaVerifierRef = () => {
+    if (Platform.OS === 'web') {
+      if (!webVerifierWrapperRef.current) {
+        const verifierInstance = new RecaptchaVerifier(auth, 'security-phone-recaptcha', { size: 'invisible' });
+        webVerifierWrapperRef.current = { current: verifierInstance };
+      }
+      return webVerifierWrapperRef.current;
+    }
+    return nativeRecaptchaRef;
+  };
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -287,6 +312,9 @@ export default function SecurityScreen({ navigation }) {
     setNewEmail('');
     setOtpStep(false);
     setOtpCode('');
+    setPhoneOtpStep(false);
+    setPhoneOtpCode('');
+    setPhoneVerificationId('');
     stopOtpTimer();
     setModalVisible(true);
   };
@@ -295,6 +323,9 @@ export default function SecurityScreen({ navigation }) {
     setModalVisible(false);
     setOtpStep(false);
     setOtpCode('');
+    setPhoneOtpStep(false);
+    setPhoneOtpCode('');
+    setPhoneVerificationId('');
     stopOtpTimer();
   };
 
@@ -347,6 +378,14 @@ export default function SecurityScreen({ navigation }) {
         );
         return false;
       }
+
+      if (!currentPhone || currentPhone === 'Not Set') {
+        Alert.alert(
+          "Phone Number Required",
+          "For your security, email changes are verified via your registered phone number. Please add a phone number first (see the Phone section above), then try changing your email again."
+        );
+        return false;
+      }
     }
 
     return true;
@@ -372,6 +411,43 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
+  // --- PHONE change: now requires an EMAIL OTP first ---
+  const sendPhoneChangeEmailOtp = async () => {
+    setOtpSending(true);
+    try {
+      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
+      await sendOtp({ purpose: 'PHONE_CHANGE' });
+      setOtpStep(true);
+      setOtpCode('');
+      startOtpTimer();
+    } catch (err) {
+      Alert.alert("Error", err.message || "Failed to send verification code.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  // --- EMAIL change: requires an SMS OTP sent to the REGISTERED phone ---
+  const sendEmailChangePhoneOtp = async () => {
+    setOtpSending(true);
+    try {
+      const verifierRef = getRecaptchaVerifierRef();
+      const res = await sendSMSOTP(currentPhone, verifierRef);
+      if (res.success) {
+        setPhoneVerificationId(res.verificationId);
+        setPhoneOtpCode('');
+        setPhoneOtpStep(true);
+        startOtpTimer();
+      } else {
+        Alert.alert("Error", res.message);
+      }
+    } catch (err) {
+      Alert.alert("Error", err.message || "Failed to send SMS code.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
   const handleUpdate = async () => {
     if (!validateInputs()) return;
 
@@ -391,41 +467,14 @@ export default function SecurityScreen({ navigation }) {
       return;
     }
 
-    if (activeLayer === 'email') {
-      const cleanEmail = newEmail.trim().toLowerCase();
-      setOtpSending(true);
-      try {
-        const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
-        await sendOtp({ purpose: 'EMAIL_CHANGE', emailInput: cleanEmail });
-        setOtpStep(true);
-        setOtpCode('');
-        startOtpTimer();
-      } catch (err) {
-        Alert.alert("Error", err.message || "Failed to send verification code to the new email.");
-      } finally {
-        setOtpSending(false);
-      }
+    if (activeLayer === 'phone') {
+      await sendPhoneChangeEmailOtp();
       return;
     }
 
-    setLoading(true);
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        Alert.alert("Error", "Session expired. Please log in again.");
-        setLoading(false);
-        return;
-      }
-
-      const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
-      await updateDoc(doc(db, 'users', user.uid), { phone: fullPhone });
-      setCurrentPhone(fullPhone);
-      Alert.alert("Success", "Phone number updated successfully!");
-      closeModal();
-    } catch (err) {
-      Alert.alert("Update Failed", err.message || "An error occurred during update.");
-    } finally {
-      setLoading(false);
+    if (activeLayer === 'email') {
+      await sendEmailChangePhoneOtp();
+      return;
     }
   };
 
@@ -434,18 +483,23 @@ export default function SecurityScreen({ navigation }) {
     setOtpSending(true);
     try {
       const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
-      if (activeLayer === 'email') {
-        await sendOtp({ purpose: 'EMAIL_CHANGE', emailInput: newEmail.trim().toLowerCase() });
-      } else {
+      if (activeLayer === 'password') {
         await sendOtp({ purpose: 'PASSWORD_CHANGE' });
+      } else if (activeLayer === 'phone') {
+        await sendOtp({ purpose: 'PHONE_CHANGE' });
       }
       startOtpTimer();
-      Alert.alert("Code Resent", "A new verification code has been sent.");
+      Alert.alert("Code Resent", "A new verification code has been sent to your email.");
     } catch (err) {
       Alert.alert("Error", err.message || "Failed to resend the code.");
     } finally {
       setOtpSending(false);
     }
+  };
+
+  const handleResendPhoneOtp = async () => {
+    if (!canResendOtp) return;
+    await sendEmailChangePhoneOtp();
   };
 
   const handleVerifyOtp = async () => {
@@ -470,17 +524,16 @@ export default function SecurityScreen({ navigation }) {
         await updatePassword(user, newPassword);
         closeModal();
         forceReLogin("Your password has been changed successfully. For your security, please log in again with your new password.");
-      } else if (activeLayer === 'email') {
-        const cleanEmail = newEmail.trim().toLowerCase();
+      } else if (activeLayer === 'phone') {
         const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
-        await verifyOtp({ email: cleanEmail, code: otpCode, purpose: 'EMAIL_CHANGE' });
+        await verifyOtp({ email: user.email, code: otpCode, purpose: 'PHONE_CHANGE' });
 
-        await updateEmail(user, cleanEmail);
-        await updateDoc(doc(db, 'users', user.uid), { email: cleanEmail });
-        setCurrentEmail(cleanEmail);
+        const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
+        await updateDoc(doc(db, 'users', user.uid), { phone: fullPhone });
+        setCurrentPhone(fullPhone);
 
         closeModal();
-        forceReLogin("Your email address has been changed and verified successfully. For your security, please log in again with your new email.");
+        Alert.alert("Success", "Phone number updated successfully!");
       }
     } catch (err) {
       if (err.code === 'auth/requires-recent-login') {
@@ -493,10 +546,42 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
+  const handleVerifyPhoneOtpForEmail = async () => {
+    if (phoneOtpCode.length !== 6) {
+      Alert.alert("Invalid Code", "Please enter the 6-digit code.");
+      return;
+    }
+
+    setOtpVerifying(true);
+    try {
+      const result = await verifySMSOTP(phoneVerificationId, phoneOtpCode);
+      if (!result.success) {
+        Alert.alert("Verification Failed", result.message);
+        setOtpVerifying(false);
+        return;
+      }
+
+      const user = auth.currentUser;
+      const cleanEmail = newEmail.trim().toLowerCase();
+
+      await updateEmail(user, cleanEmail);
+      await updateDoc(doc(db, 'users', user.uid), { email: cleanEmail });
+      setCurrentEmail(cleanEmail);
+
+      closeModal();
+      forceReLogin("Your email address has been changed and verified successfully via your phone number. For your security, please log in again with your new email.");
+    } catch (err) {
+      if (err.code === 'auth/requires-recent-login') {
+        Alert.alert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
+      } else {
+        Alert.alert("Error", err.message || "Failed to update email.");
+      }
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
   const handleOtpCancel = () => {
-    setOtpStep(false);
-    setOtpCode('');
-    stopOtpTimer();
     closeModal();
   };
 
@@ -525,7 +610,7 @@ export default function SecurityScreen({ navigation }) {
             </View>
             <View style={styles.textContainer}>
               <Text style={currentStyles.cardTitle}>Change Login Password</Text>
-              <Text style={styles.cardSubtitle}>OTP VERIFICATION REQUIRED</Text>
+              <Text style={styles.cardSubtitle}>EMAIL OTP REQUIRED</Text>
             </View>
           </View>
           <Feather name="chevron-right" size={18} color="#94A3B8" />
@@ -574,10 +659,11 @@ export default function SecurityScreen({ navigation }) {
               <View style={[styles.modalHeader, { borderBottomColor: isDarkMode ? '#21262D' : '#E2E8F0' }]}>
                 <Text style={isDarkMode ? darkStyles.modalTitle : lightStyles.modalTitle}>
                   {activeLayer === 'password' && !otpStep && "Change Login Password"}
-                  {activeLayer === 'password' && otpStep && "Verify OTP"}
-                  {activeLayer === 'phone' && "Change Phone Number"}
-                  {activeLayer === 'email' && !otpStep && "Change Email Address"}
-                  {activeLayer === 'email' && otpStep && "Verify New Email"}
+                  {activeLayer === 'password' && otpStep && "Verify Email OTP"}
+                  {activeLayer === 'phone' && !otpStep && "Change Phone Number"}
+                  {activeLayer === 'phone' && otpStep && "Verify Email OTP"}
+                  {activeLayer === 'email' && !phoneOtpStep && "Change Email Address"}
+                  {activeLayer === 'email' && phoneOtpStep && "Verify Phone OTP"}
                 </Text>
                 <TouchableOpacity onPress={closeModal}>
                   <Feather name="x" size={20} color={isDarkMode ? "#94A3B8" : "#64748B"} />
@@ -610,7 +696,7 @@ export default function SecurityScreen({ navigation }) {
                 </View>
               )}
 
-              {activeLayer === 'phone' && (
+              {activeLayer === 'phone' && !otpStep && (
                 <View style={styles.formContainer}>
                   <Text style={styles.currentActiveLabel}>Current Phone: {currentPhone}</Text>
                   <View style={styles.phoneInputRow}>
@@ -636,10 +722,13 @@ export default function SecurityScreen({ navigation }) {
                       onChangeText={handlePhoneChange}
                     />
                   </View>
+                  <Text style={styles.infoAlert}>
+                    * For your security, a 6-digit code will be sent to your registered email ({currentEmail}) before this change is saved.
+                  </Text>
                 </View>
               )}
 
-              {activeLayer === 'email' && !otpStep && (
+              {activeLayer === 'email' && !phoneOtpStep && (
                 <View style={styles.formContainer}>
                   <Text style={styles.currentActiveLabel}>Current Email: {currentEmail}</Text>
                   <View style={styles.inputWrapper}>
@@ -653,15 +742,16 @@ export default function SecurityScreen({ navigation }) {
                       onChangeText={setNewEmail}
                     />
                   </View>
+                  <Text style={styles.infoAlert}>
+                    * For your security, a 6-digit code will be sent via SMS to your registered phone number ({currentPhone}) before this change is saved.
+                  </Text>
                 </View>
               )}
 
-              {(activeLayer === 'password' || activeLayer === 'email') && otpStep && (
+              {(activeLayer === 'password' || activeLayer === 'phone') && otpStep && (
                 <View style={styles.formContainer}>
                   <Text style={styles.currentActiveLabel}>
-                    {activeLayer === 'password'
-                      ? `We sent a 6-digit code to ${currentEmail}`
-                      : `We sent a 6-digit code to ${newEmail.trim().toLowerCase()}`}
+                    We sent a 6-digit code to {currentEmail}
                   </Text>
                   <View style={styles.inputWrapper}>
                     <TextInput
@@ -686,19 +776,54 @@ export default function SecurityScreen({ navigation }) {
                 </View>
               )}
 
-              {activeLayer === 'phone' && (
-                <Text style={styles.infoAlert}>
-                  * Phone number changes do not require OTP verification since this number is not used for account login.
-                </Text>
+              {activeLayer === 'email' && phoneOtpStep && (
+                <View style={styles.formContainer}>
+                  <Text style={styles.currentActiveLabel}>
+                    We sent a 6-digit code via SMS to {currentPhone}
+                  </Text>
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={isDarkMode ? darkStyles.inputField : lightStyles.inputField}
+                      placeholder="Enter 6-digit code"
+                      placeholderTextColor="#64748B"
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      value={phoneOtpCode}
+                      onChangeText={(text) => setPhoneOtpCode(text.replace(/[^0-9]/g, ''))}
+                    />
+                  </View>
+                  <View style={styles.otpTimerRow}>
+                    {canResendOtp ? (
+                      <TouchableOpacity onPress={handleResendPhoneOtp} disabled={otpSending}>
+                        <Text style={styles.resendActiveText}>Resend Code</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <Text style={styles.resendDisabledText}>Resend code in 0:{otpTimer < 10 ? `0${otpTimer}` : otpTimer}</Text>
+                    )}
+                  </View>
+                </View>
               )}
 
               <View style={styles.modalActions}>
-                {(activeLayer === 'password' || activeLayer === 'email') && otpStep ? (
+                {((activeLayer === 'password' || activeLayer === 'phone') && otpStep) ? (
                   <>
                     <TouchableOpacity style={styles.cancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
                       <Text style={styles.cancelBtnText}>Cancel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.submitBtn} onPress={handleVerifyOtp} disabled={otpVerifying}>
+                      {otpVerifying ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.submitBtnText}>Verify OTP</Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                ) : (activeLayer === 'email' && phoneOtpStep) ? (
+                  <>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
+                      <Text style={styles.cancelBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.submitBtn} onPress={handleVerifyPhoneOtpForEmail} disabled={otpVerifying}>
                       {otpVerifying ? (
                         <ActivityIndicator color="#FFFFFF" />
                       ) : (
@@ -712,7 +837,7 @@ export default function SecurityScreen({ navigation }) {
                       <ActivityIndicator color="#FFFFFF" />
                     ) : (
                       <Text style={styles.submitBtnText}>
-                        {activeLayer === 'phone' ? 'Update Phone Number' : 'Send Verification Code'}
+                        {activeLayer === 'email' ? 'Send Code to Phone' : 'Send Verification Code'}
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -773,6 +898,15 @@ export default function SecurityScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {Platform.OS === 'web' ? (
+        <View nativeID="security-phone-recaptcha" />
+      ) : (
+        <FirebaseRecaptchaVerifierModal
+          ref={nativeRecaptchaRef}
+          firebaseConfig={firebaseConfig}
+        />
+      )}
 
     </SafeAreaView>
   );
