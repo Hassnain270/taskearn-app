@@ -16,13 +16,13 @@ import {
   ScrollView
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { RecaptchaVerifier } from 'firebase/auth';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import { auth, db, firebaseConfig } from '../firebaseConfig';
+import { RecaptchaVerifier, PhoneAuthProvider, signInWithCredential, signOut } from 'firebase/auth';
+import { auth, db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
+import { sendSMSOTP } from '../services/phoneAuthService';
+import PhoneVerifyBridge from '../components/PhoneVerifyBridge';
 
 const functionsInstance = getFunctions();
 
@@ -59,29 +59,25 @@ export default function LoginScreen({ navigation }) {
   const [isResetLoading, setIsResetLoading] = useState(false);
 
   const [userData, setUserData] = useState(null);
+  const [resetToken, setResetToken] = useState('');
 
-  // Email-OTP attempt tracking -> after enough attempts, offer phone fallback
   const [emailAttemptCount, setEmailAttemptCount] = useState(0);
   const [phoneOtpMode, setPhoneOtpMode] = useState(false);
   const [phoneVerificationId, setPhoneVerificationId] = useState('');
+  const [bridgeVisible, setBridgeVisible] = useState(false);
 
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
   const intervalRef = useRef(null);
 
-  // reCAPTCHA verifiers for phone OTP (web + native)
-  const nativeRecaptchaRef = useRef(null);
   const webVerifierWrapperRef = useRef(null);
 
   const getRecaptchaVerifierRef = () => {
-    if (Platform.OS === 'web') {
-      if (!webVerifierWrapperRef.current) {
-        const verifierInstance = new RecaptchaVerifier(auth, 'login-phone-recaptcha', { size: 'invisible' });
-        webVerifierWrapperRef.current = { current: verifierInstance };
-      }
-      return webVerifierWrapperRef.current;
+    if (!webVerifierWrapperRef.current) {
+      const verifierInstance = new RecaptchaVerifier(auth, 'login-phone-recaptcha', { size: 'invisible' });
+      webVerifierWrapperRef.current = { current: verifierInstance };
     }
-    return nativeRecaptchaRef;
+    return webVerifierWrapperRef.current;
   };
 
   useEffect(() => {
@@ -225,9 +221,18 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // "Unable to receive the code?" — sends the user to phone verification
+  // instead. On native this opens the WebView bridge (same proven code
+  // that already works on web, just delivered differently). On web, it
+  // proceeds directly.
   const handleSwitchToPhoneOtp = async () => {
     if (!userData?.phone) {
       showAlert("No Phone on File", "This account does not have a registered phone number for recovery. Please contact support.");
+      return;
+    }
+
+    if (Platform.OS !== 'web') {
+      setBridgeVisible(true);
       return;
     }
 
@@ -297,25 +302,39 @@ export default function LoginScreen({ navigation }) {
 
     setIsResetLoading(true);
 
+    // Web-only phone fallback path: real Firebase verification via
+    // signInWithCredential (this contacts Firebase's servers and actually
+    // validates the code — unlike just building a credential object).
     if (phoneOtpMode) {
       try {
-        const result = await verifySMSOTP(phoneVerificationId, otpInput);
+        const credential = PhoneAuthProvider.credential(phoneVerificationId, otpInput);
+        await signInWithCredential(auth, credential);
+
+        const issueToken = httpsCallable(functionsInstance, 'issuePasswordResetTokenForPhone');
+        const res = await issueToken();
+        setResetToken(res.data.resetToken);
+
+        try { await signOut(auth); } catch (e) {}
+
         setIsResetLoading(false);
-        if (result.success) {
-          setForgetStep(3);
-        } else {
-          showAlert("Error", result.message);
-        }
+        setForgetStep(3);
       } catch (error) {
         setIsResetLoading(false);
-        showAlert("Error", error.message || "Verification failed.");
+        if (error.code === 'auth/invalid-verification-code') {
+          showAlert("Error", "Incorrect code. Please check and try again.");
+        } else if (error.code === 'auth/code-expired') {
+          showAlert("Error", "This code has expired. Please request a new one.");
+        } else {
+          showAlert("Error", error.message || "Verification failed.");
+        }
       }
       return;
     }
 
     try {
       const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
-      await verifyOtp({ email: userData.email, code: otpInput, purpose: 'FORGOT_PASSWORD' });
+      const res = await verifyOtp({ email: userData.email, code: otpInput, purpose: 'FORGOT_PASSWORD' });
+      setResetToken(res.data.resetToken);
       setIsResetLoading(false);
       setForgetStep(3);
     } catch (error) {
@@ -324,9 +343,24 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // Native-only: called when the WebView bridge finishes phone
+  // verification and hands back a resetToken.
+  const handleBridgeResult = (data) => {
+    setBridgeVisible(false);
+    if (data.resetToken) {
+      setResetToken(data.resetToken);
+      setForgetStep(3);
+    }
+  };
+
   const handleSaveNewPassword = async () => {
     if (newPassword.length < 6) {
       showAlert("Alert", "Password must be at least 6 characters.");
+      return;
+    }
+    if (!resetToken) {
+      showAlert("Error", "Your verification has expired. Please start again.");
+      resetModal();
       return;
     }
 
@@ -334,14 +368,14 @@ export default function LoginScreen({ navigation }) {
 
     try {
       const resetPasswordFunc = httpsCallable(functionsInstance, 'resetUserPassword');
-      await resetPasswordFunc({ uid: userData.uid, newPassword: newPassword });
+      await resetPasswordFunc({ resetToken: resetToken, newPassword: newPassword });
 
       setIsResetLoading(false);
       showAlert("Success", "Your password has been changed successfully.");
       resetModal();
     } catch (error) {
       setIsResetLoading(false);
-      showAlert("Error", "Failed to update password. Please try again.");
+      showAlert("Error", error.message || "Failed to update password. Please try again.");
     }
   };
 
@@ -352,10 +386,12 @@ export default function LoginScreen({ navigation }) {
     setOtpInput('');
     setNewPassword('');
     setUserData(null);
+    setResetToken('');
     setIsResetLoading(false);
     setEmailAttemptCount(0);
     setPhoneOtpMode(false);
     setPhoneVerificationId('');
+    setBridgeVisible(false);
   };
 
   return (
@@ -598,12 +634,17 @@ export default function LoginScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {Platform.OS === 'web' ? (
+      {Platform.OS === 'web' && (
         <View nativeID="login-phone-recaptcha" />
-      ) : (
-        <FirebaseRecaptchaVerifierModal
-          ref={nativeRecaptchaRef}
-          firebaseConfig={firebaseConfig}
+      )}
+
+      {Platform.OS !== 'web' && (
+        <PhoneVerifyBridge
+          visible={bridgeVisible}
+          purpose="forgot_password"
+          phone={userData?.phone || ''}
+          onResult={handleBridgeResult}
+          onClose={() => setBridgeVisible(false)}
         />
       )}
     </SafeAreaView>
