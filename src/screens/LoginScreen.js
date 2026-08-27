@@ -26,7 +26,11 @@ import PhoneVerifyBridge from '../components/PhoneVerifyBridge';
 
 const functionsInstance = getFunctions();
 
-const MAX_EMAIL_ATTEMPTS_BEFORE_PHONE_FALLBACK = 5;
+// Lowered from 5 to 3: after the first attempt, one or two resends are
+// enough to confirm whether the email is actually arriving. Continuing to
+// resend beyond that rarely helps and only spends more of the monthly
+// email/SMS quota, so we offer the phone fallback sooner.
+const MAX_EMAIL_ATTEMPTS_BEFORE_PHONE_FALLBACK = 3;
 
 const showAlert = (title, message, buttons) => {
   if (Platform.OS === 'web') {
@@ -221,10 +225,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // "Unable to receive the code?" — sends the user to phone verification
-  // instead. On native this opens the WebView bridge (same proven code
-  // that already works on web, just delivered differently). On web, it
-  // proceeds directly.
   const handleSwitchToPhoneOtp = async () => {
     if (!userData?.phone) {
       showAlert("No Phone on File", "This account does not have a registered phone number for recovery. Please contact support.");
@@ -302,9 +302,6 @@ export default function LoginScreen({ navigation }) {
 
     setIsResetLoading(true);
 
-    // Web-only phone fallback path: real Firebase verification via
-    // signInWithCredential (this contacts Firebase's servers and actually
-    // validates the code — unlike just building a credential object).
     if (phoneOtpMode) {
       try {
         const credential = PhoneAuthProvider.credential(phoneVerificationId, otpInput);
@@ -343,8 +340,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // Native-only: called when the WebView bridge finishes phone
-  // verification and hands back a resetToken.
   const handleBridgeResult = (data) => {
     setBridgeVisible(false);
     if (data.resetToken) {
