@@ -14,12 +14,28 @@ import * as Clipboard from 'expo-clipboard';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
+
+const functionsInstance = getFunctions();
+
+// Formats a decimal rate (e.g. 0.10) as a clean percentage string (e.g.
+// "10") without unnecessary trailing zeros for non-round rates.
+const formatPercent = (rate) => {
+  const value = rate * 100;
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+};
 
 export default function InvitationScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
   const [referralCode, setReferralCode] = useState(route?.params?.referralCode || "");
   const [userUid, setUserUid] = useState(route?.params?.userUid || auth.currentUser?.uid || "000000");
+
+  // Defaults match the standard rates while the real values load from the
+  // central config, so the screen never shows blank/zero percentages.
+  const [directReferralRate, setDirectReferralRate] = useState(0.10);
+  const [indirectReferralRate, setIndirectReferralRate] = useState(0.05);
+  const [welcomeBonusRate, setWelcomeBonusRate] = useState(0.07);
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -47,9 +63,31 @@ export default function InvitationScreen({ navigation, route }) {
     }
   }, []);
 
+  useEffect(() => {
+    const loadBonusRates = async () => {
+      try {
+        const getBonusConfig = httpsCallable(functionsInstance, 'getBonusConfig');
+        const res = await getBonusConfig();
+        const rates = res.data?.rates;
+        if (rates) {
+          if (typeof rates.directReferralRate === 'number') setDirectReferralRate(rates.directReferralRate);
+          if (typeof rates.indirectReferralRate === 'number') setIndirectReferralRate(rates.indirectReferralRate);
+          if (typeof rates.welcomeBonusRate === 'number') setWelcomeBonusRate(rates.welcomeBonusRate);
+        }
+      } catch (err) {
+        // Keep default rates if this fails — never block the screen.
+      }
+    };
+    loadBonusRates();
+  }, []);
+
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
   const activeRefCode = referralCode || userUid.substring(0, 6).toUpperCase();
   const referralLink = `https://taskearn-app.com/#/register?ref=${activeRefCode}`;
+
+  const directPercentLabel = formatPercent(directReferralRate);
+  const indirectPercentLabel = formatPercent(indirectReferralRate);
+  const welcomePercentLabel = formatPercent(welcomeBonusRate);
 
   const handleCopyCode = async () => {
     try {
@@ -139,9 +177,9 @@ export default function InvitationScreen({ navigation, route }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={currentStyles.rewardTitle}>Direct Affiliate Reward</Text>
-              <Text style={currentStyles.rewardDescription}>Earn a direct 10% commission bonus from your Level 1 member's active VIP package activation value.</Text>
+              <Text style={currentStyles.rewardDescription}>Earn a direct {directPercentLabel}% commission bonus from your Level 1 member's active VIP package activation value.</Text>
             </View>
-            <Text style={styles.percentageText}>10%</Text>
+            <Text style={styles.percentageText}>{directPercentLabel}%</Text>
           </View>
 
           <View style={styles.dividerLine} />
@@ -152,9 +190,9 @@ export default function InvitationScreen({ navigation, route }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={currentStyles.rewardTitle}>Sub-Affiliate Reward</Text>
-              <Text style={currentStyles.rewardDescription}>Earn an additional 5% structural commission bonus from your Level 2 network registrations.</Text>
+              <Text style={currentStyles.rewardDescription}>Earn an additional {indirectPercentLabel}% structural commission bonus from your Level 2 network registrations.</Text>
             </View>
-            <Text style={[styles.percentageText, { color: '#10B981' }]}>5%</Text>
+            <Text style={[styles.percentageText, { color: '#10B981' }]}>{indirectPercentLabel}%</Text>
           </View>
 
           <View style={styles.dividerLine} />
@@ -165,9 +203,9 @@ export default function InvitationScreen({ navigation, route }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={currentStyles.rewardTitle}>New Member Welcome Bonus</Text>
-              <Text style={currentStyles.rewardDescription}>Newly registered members instantly receive a 7% signup bonus upon their successful initial deposit transaction.</Text>
+              <Text style={currentStyles.rewardDescription}>Newly registered members instantly receive a {welcomePercentLabel}% signup bonus upon their successful initial deposit transaction.</Text>
             </View>
-            <Text style={[styles.percentageText, { color: '#F59E0B' }]}>7%</Text>
+            <Text style={[styles.percentageText, { color: '#F59E0B' }]}>{welcomePercentLabel}%</Text>
           </View>
         </View>
 
