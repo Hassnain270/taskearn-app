@@ -802,18 +802,6 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const activeTier = getVipTierByBalance(finalUserBalance);
     const baseVipCapital = activeTier ? activeTier.minCapital : 0;
 
-    // Pre-fetch the entire referral chain BEFORE any writes (Firestore
-    // transaction rule requires all reads before any write).
-    //
-    // IMPORTANT FIX: "referredBy" stores the referral CODE text the user
-    // typed at registration (e.g. "BV5DUF") — it is NOT a Firestore
-    // document ID. The actual UID of the referrer is stored separately as
-    // "referredByUid". The previous version incorrectly did
-    // db.collection("users").doc(userData.referredBy), which looked for a
-    // document whose ID equals a 6-character code — such a document can
-    // essentially never exist (real UIDs are long random strings), so
-    // level1Doc.exists was always false and every referral bonus was
-    // silently skipped, with no error ever thrown.
     let level1Ref = null, level1Doc = null, level1Data = null;
     let level2Ref = null, level2Doc = null, level2Data = null;
 
@@ -831,8 +819,6 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
         }
       }
     }
-
-    // ---- All writes happen below this line ----
 
     transaction.update(userRef, {
       balance: finalUserBalance,
@@ -1314,7 +1300,98 @@ exports.verifyEmailOTP = onCall(async (request) => {
   }
 
   await otpRef.delete();
+
+  // For FORGOT_PASSWORD, issue a short-lived, single-use reset token tied
+  // to the account's UID. resetUserPassword requires this token instead of
+  // trusting a client-supplied UID directly — otherwise anyone who knew a
+  // victim's UID could reset their password without ever verifying an OTP.
+  if (purpose === "FORGOT_PASSWORD") {
+    const userQuery = await db.collection("users").where("email", "==", email).limit(1).get();
+    if (userQuery.empty) throw new HttpsError("not-found", "Account not found.");
+
+    const uid = userQuery.docs[0].id;
+    const resetToken = db.collection("passwordResetTokens").doc().id;
+
+    await db.collection("passwordResetTokens").doc(resetToken).set({
+      uid: uid,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return { success: true, verified: true, resetToken };
+  }
+
   return { success: true, verified: true };
+});
+
+// ============================================
+// PHONE OTP FALLBACK (Forgot Password) — server-side verification.
+// The client must call Firebase's signInWithCredential(auth, credential)
+// FIRST, which is the only way Firebase actually validates an SMS code
+// against its servers. If that succeeds, request.auth here is populated
+// with a REAL, Firebase-verified UID — proving both that the code was
+// correct AND that this phone number belongs to that specific account
+// (this only resolves to the correct account if the phone number was
+// previously linked to it via linkWithCredential during a Phone Number
+// change in the Security screen).
+// ============================================
+exports.issuePasswordResetTokenForPhone = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Phone verification did not complete. Please try again.");
+  }
+
+  const uid = request.auth.uid;
+  const db = admin.firestore();
+
+  const resetToken = db.collection("passwordResetTokens").doc().id;
+  await db.collection("passwordResetTokens").doc(resetToken).set({
+    uid: uid,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { success: true, resetToken };
+});
+
+// ============================================
+// RESET PASSWORD — requires a valid, single-use resetToken issued by
+// either verifyEmailOTP (FORGOT_PASSWORD purpose) or
+// issuePasswordResetTokenForPhone above. Never trusts a client-supplied
+// UID directly.
+// ============================================
+exports.resetUserPassword = onCall(async (request) => {
+  const { resetToken, newPassword } = request.data || {};
+
+  if (!resetToken || !newPassword) {
+    throw new HttpsError("invalid-argument", "Reset token and new password are required.");
+  }
+  if (newPassword.length < 6) {
+    throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
+  }
+
+  const db = admin.firestore();
+  const tokenRef = db.collection("passwordResetTokens").doc(resetToken);
+  const tokenDoc = await tokenRef.get();
+
+  if (!tokenDoc.exists) {
+    throw new HttpsError("not-found", "This reset link is invalid or has already been used.");
+  }
+
+  const tokenData = tokenDoc.data();
+  if (Date.now() > tokenData.expiresAt) {
+    await tokenRef.delete();
+    throw new HttpsError("deadline-exceeded", "This reset link has expired. Please start again.");
+  }
+
+  await tokenRef.delete();
+
+  try {
+    await admin.auth().updateUser(tokenData.uid, { password: newPassword });
+    return { success: true, message: "Password updated successfully." };
+  } catch (error) {
+    console.error("Error resetting password:", error);
+    throw new HttpsError("internal", "Failed to reset password. Please try again.");
+  }
 });
 
 // ============================================
