@@ -16,15 +16,26 @@ import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { 
   generateDepositAddress,
   generateBEP20DepositAddress
 } from '../utils/tronWallet';
 import { ThemeContext } from '../../ThemeContext';
 
+const functionsInstance = getFunctions();
+
 const NETWORK_FEE_HINT = {
   TRC20: 'Sending platforms (exchanges/wallets) usually charge their own withdrawal fee, typically around $1 USDT on TRC-20. Consider sending slightly more than your intended deposit to cover it.',
   BEP20: 'Sending platforms (exchanges/wallets) usually charge their own withdrawal fee, typically around $0.30 USDT on BEP-20. Consider sending slightly more than your intended deposit to cover it.'
+};
+
+// Formats a decimal rate (e.g. 0.07) as a clean percentage string (e.g.
+// "7") without unnecessary trailing zeros for non-round rates (e.g. 0.075
+// -> "7.5").
+const formatPercent = (rate) => {
+  const value = rate * 100;
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 };
 
 export default function DepositScreen({ navigation }) {
@@ -38,9 +49,30 @@ export default function DepositScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [depositStatus, setDepositStatus] = useState('pending');
 
+  // Defaults to the standard 7% while the real rate loads from the central
+  // config, so the screen never shows a blank/zero bonus during that brief
+  // moment — then updates automatically once getBonusConfig resolves.
+  const [welcomeBonusRate, setWelcomeBonusRate] = useState(0.07);
+
+  useEffect(() => {
+    const loadBonusRate = async () => {
+      try {
+        const getBonusConfig = httpsCallable(functionsInstance, 'getBonusConfig');
+        const res = await getBonusConfig();
+        if (typeof res.data?.rates?.welcomeBonusRate === 'number') {
+          setWelcomeBonusRate(res.data.rates.welcomeBonusRate);
+        }
+      } catch (err) {
+        // Keep the default rate if this fails — never block the deposit flow.
+      }
+    };
+    loadBonusRate();
+  }, []);
+
   const depositAmount = parseFloat(amount) || 0;
-  const bonusAmount = (depositAmount * 0.07).toFixed(2);
+  const bonusAmount = (depositAmount * welcomeBonusRate).toFixed(2);
   const totalAmount = (depositAmount + parseFloat(bonusAmount)).toFixed(2);
+  const welcomeBonusPercentLabel = formatPercent(welcomeBonusRate);
 
   useEffect(() => {
     if (!addressGenerated) return;
@@ -165,7 +197,7 @@ export default function DepositScreen({ navigation }) {
 
         <View style={currentStyles.bonusBanner}>
           <FontAwesome5 name="gift" size={16} color="#10B981" />
-          <Text style={currentStyles.bonusBannerText}>Sign-Up Promotion: Get an exclusive 7% bonus credited automatically on your very first deposit!</Text>
+          <Text style={currentStyles.bonusBannerText}>Sign-Up Promotion: Get an exclusive {welcomeBonusPercentLabel}% bonus credited automatically on your very first deposit!</Text>
         </View>
 
         {/* Network Selector Section */}
@@ -241,7 +273,7 @@ export default function DepositScreen({ navigation }) {
               <Text style={currentStyles.summaryValue}>{depositAmount.toFixed(2)} USDT</Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>7% Sign-Up Bonus:</Text>
+              <Text style={styles.summaryLabel}>{welcomeBonusPercentLabel}% Sign-Up Bonus:</Text>
               <Text style={currentStyles.summaryValue}>+{bonusAmount} USDT</Text>
             </View>
             <View style={[styles.summaryRow, currentStyles.totalRowBorder]}>
