@@ -6,7 +6,7 @@ import {
   signInWithCustomToken,
   linkWithCredential,
   reauthenticateWithCredential,
-  updateEmail
+  verifyBeforeUpdateEmail
 } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -20,12 +20,6 @@ const postResultToApp = (result) => {
   }
 };
 
-// React Navigation's own linking-based param parsing isn't always reliable
-// for a fresh page load inside a native WebView (same issue RegisterScreen
-// works around for its "ref" param). As a robust fallback, this reads the
-// query string directly from the URL — checking window.location.search
-// first, then falling back to whatever follows "?" inside the hash
-// fragment (since our URLs look like "...#/phone-verify?purpose=...").
 const getUrlParam = (name) => {
   if (typeof window === 'undefined' || !window.location) return null;
   try {
@@ -144,11 +138,17 @@ export default function PhoneVerifyScreen({ route }) {
 
       if (purpose === 'email_change') {
         await verifyAndBindPhoneCredential(credential);
+
         const user = auth.currentUser;
-        await updateEmail(user, newEmail);
+        // Firebase no longer allows changing email directly — it now
+        // requires the NEW email to be verified via a link Firebase sends
+        // to it. The actual change only takes effect once that link is
+        // clicked; until then, the account's login email stays the old one.
+        await verifyBeforeUpdateEmail(user, newEmail);
         await updateDoc(doc(db, 'users', user.uid), { email: newEmail });
+
         setStatus('done');
-        postResultToApp({ success: true, purpose });
+        postResultToApp({ success: true, purpose, pendingEmailConfirmation: true });
         return;
       }
 
@@ -209,7 +209,13 @@ export default function PhoneVerifyScreen({ route }) {
         {status === 'done' && (
           <View style={styles.centerBox}>
             <Text style={styles.successText}>✓ Verified successfully</Text>
-            <Text style={styles.subText}>You can close this window.</Text>
+            {purpose === 'email_change' ? (
+              <Text style={styles.subText}>
+                A confirmation link has been sent to {newEmail}. Please check that inbox and click the link to activate your new email, then log in again.
+              </Text>
+            ) : (
+              <Text style={styles.subText}>You can close this window.</Text>
+            )}
           </View>
         )}
 

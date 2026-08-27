@@ -20,7 +20,7 @@ import { RecaptchaVerifier } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
 import {
   updatePassword,
-  updateEmail,
+  verifyBeforeUpdateEmail,
   signOut,
   linkWithCredential,
   reauthenticateWithCredential
@@ -245,11 +245,6 @@ export default function SecurityScreen({ navigation }) {
   const [currentPhone, setCurrentPhone] = useState('Not Set');
   const [currentEmail, setCurrentEmail] = useState('Not Set');
 
-  // Email-OTP flow — used for Password change AND Phone change (identity
-  // confirmation only). Phone changes never send an SMS: real phone
-  // linking with Firebase only happens lazily, the first time it's
-  // actually needed (Email change or the rare Forgot-Password phone
-  // fallback) — never proactively, to conserve the monthly SMS quota.
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpVerifying, setOtpVerifying] = useState(false);
@@ -258,8 +253,6 @@ export default function SecurityScreen({ navigation }) {
   const [canResendOtp, setCanResendOtp] = useState(false);
   const otpIntervalRef = useRef(null);
 
-  // Phone-OTP flow — used ONLY for Email change (verifying the CURRENT
-  // registered phone). Web uses this directly; native uses the bridge.
   const [phoneOtpStep, setPhoneOtpStep] = useState(false);
   const [phoneOtpCode, setPhoneOtpCode] = useState('');
   const [phoneVerificationId, setPhoneVerificationId] = useState('');
@@ -437,10 +430,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Real Firebase-side verification of a phone credential. First time this
-  // phone is verified for this account -> linkWithCredential (permanently
-  // ties it to this UID for future use). Already linked from before ->
-  // Firebase rejects a second link; fall back to reauthenticateWithCredential.
   const verifyAndBindPhoneCredential = async (credential) => {
     const user = auth.currentUser;
     try {
@@ -475,7 +464,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Email change only: sends SMS to the CURRENT registered phone.
   const sendEmailChangePhoneOtp = async () => {
     setOtpSending(true);
     try {
@@ -556,9 +544,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Email-OTP verification. For 'password', updates the password directly.
-  // For 'phone', this is the ONLY step required — no SMS involved at all —
-  // the new phone number is saved directly to Firestore.
   const handleVerifyOtp = async () => {
     if (otpCode.length !== 6) {
       showAlert("Invalid Code", "Please enter the 6-digit code.");
@@ -603,9 +588,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Web-only: verifies the current phone's SMS code for an Email change.
-  // This is also where lazy Firebase phone-linking happens automatically,
-  // the first time it's ever needed for this account.
   const handleVerifyPhoneOtp = async () => {
     if (phoneOtpCode.length !== 6) {
       showAlert("Invalid Code", "Please enter the 6-digit code.");
@@ -625,11 +607,18 @@ export default function SecurityScreen({ navigation }) {
 
       const user = auth.currentUser;
       const cleanEmail = newEmail.trim().toLowerCase();
-      await updateEmail(user, cleanEmail);
+
+      // Firebase no longer allows changing email directly — it now
+      // requires the NEW email to be verified via a link Firebase sends
+      // to it. The actual change only takes effect once that link is
+      // clicked; until then, sign-in still requires the OLD email.
+      await verifyBeforeUpdateEmail(user, cleanEmail);
       await updateDoc(doc(db, 'users', user.uid), { email: cleanEmail });
       setCurrentEmail(cleanEmail);
       closeModal();
-      forceReLogin("Your email address has been changed and verified successfully via your phone number. For your security, please log in again with your new email.");
+      forceReLogin(
+        `A confirmation link has been sent to ${cleanEmail}. Please check that inbox and click the link to activate your new email, then log in again using your new email.`
+      );
     } catch (err) {
       if (err.code === 'auth/invalid-verification-code') {
         showAlert("Verification Failed", "Incorrect code. Please check and try again.");
@@ -645,8 +634,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Native-only: called when the WebView bridge reports the Email change
-  // is complete (the update already happened inside the WebView's session).
   const handleBridgeResult = (data) => {
     setBridgeVisible(false);
 
@@ -654,7 +641,9 @@ export default function SecurityScreen({ navigation }) {
       const cleanEmail = newEmail.trim().toLowerCase();
       setCurrentEmail(cleanEmail);
       closeModal();
-      forceReLogin("Your email address has been changed and verified successfully via your phone number. For your security, please log in again with your new email.");
+      forceReLogin(
+        `A confirmation link has been sent to ${cleanEmail}. Please check that inbox and click the link to activate your new email, then log in again using your new email.`
+      );
     }
   };
 
@@ -820,7 +809,7 @@ export default function SecurityScreen({ navigation }) {
                     />
                   </View>
                   <Text style={styles.infoAlert}>
-                    * For your security, a 6-digit code will be sent via SMS to your registered phone number ({currentPhone}) before this change is saved.
+                    * For your security, a 6-digit code will be sent via SMS to your registered phone number ({currentPhone}). After verifying, Firebase will also send a confirmation link to your new email — you must click it before the change is final.
                   </Text>
                 </View>
               )}
