@@ -31,6 +31,7 @@ import SupportScreen from './src/screens/SupportScreen';
 import SecurityScreen from './src/screens/SecurityScreen';
 import DepositScreen from './src/screens/DepositScreen';
 import AdminWithdrawalsScreen from './src/screens/AdminWithdrawalsScreen';
+import PhoneVerifyScreen from './src/screens/PhoneVerifyScreen';
 
 class ErrorBoundary extends React.Component {
   state = { hasError: false, error: null, errorInfo: null };
@@ -123,6 +124,17 @@ const linking = {
         parse: { ref: (ref) => ref },
       },
       Home: 'home',
+      PhoneVerify: {
+        path: 'phone-verify',
+        parse: {
+          purpose: (v) => v,
+          token: (v) => v,
+          phone: (v) => v,
+          newEmail: (v) => v,
+          newPhone: (v) => v,
+          dialCode: (v) => v,
+        },
+      },
     },
   },
   getInitialURL: async () => {
@@ -180,6 +192,13 @@ export default function App() {
         if (isRegisterPath && referralCode) {
           initialRouteName = 'Register';
         }
+
+        const isPhoneVerifyPath =
+          parsedUrl.pathname === '/phone-verify' ||
+          parsedUrl.pathname.endsWith('/phone-verify');
+        if (isPhoneVerifyPath) {
+          initialRouteName = 'PhoneVerify';
+        }
       }
     } catch (error) {}
   }
@@ -225,6 +244,7 @@ export default function App() {
               <Stack.Screen name="SecurityScreen" component={SecurityScreen} />
               <Stack.Screen name="Deposit" component={DepositScreen} />
               <Stack.Screen name="AdminWithdrawalsScreen" component={AdminWithdrawalsScreen} />
+              <Stack.Screen name="PhoneVerify" component={PhoneVerifyScreen} />
             </Stack.Navigator>
           </NavigationContainer>
         </ThemeProvider>
