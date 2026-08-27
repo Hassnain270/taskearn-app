@@ -16,10 +16,16 @@ import {
   KeyboardAvoidingView
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { RecaptchaVerifier } from 'firebase/auth';
+import { RecaptchaVerifier, PhoneAuthProvider } from 'firebase/auth';
 import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { auth, db, firebaseConfig } from '../firebaseConfig';
-import { updatePassword, updateEmail, signOut } from 'firebase/auth';
+import {
+  updatePassword,
+  updateEmail,
+  signOut,
+  linkWithCredential,
+  reauthenticateWithCredential
+} from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { sendSMSOTP, verifySMSOTP } from '../services/phoneAuthService';
@@ -202,6 +208,25 @@ const ALL_COUNTRIES = [
 
 const ALLOWED_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com'];
 
+// Alert.alert renders nothing visible on web (react-native-web has no UI
+// implementation for it) — every alert in this screen must go through this
+// cross-platform wrapper instead, or failures on web are completely silent.
+const showAlert = (title, message, buttons) => {
+  if (Platform.OS === 'web') {
+    if (buttons && buttons.length > 0) {
+      const confirmAction = window.confirm(`${title}\n\n${message}`);
+      if (confirmAction) {
+        const primaryBtn = buttons.find(b => b.onPress);
+        if (primaryBtn) primaryBtn.onPress();
+      }
+    } else {
+      window.alert(`${title}\n\n${message}`);
+    }
+  } else {
+    Alert.alert(title, message, buttons);
+  }
+};
+
 export default function SecurityScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
@@ -223,7 +248,7 @@ export default function SecurityScreen({ navigation }) {
   const [currentPhone, setCurrentPhone] = useState('Not Set');
   const [currentEmail, setCurrentEmail] = useState('Not Set');
 
-  // Email-OTP flow (used for Password change, and now Phone change too)
+  // Email-OTP flow (Password change, and the identity-confirmation step of Phone change)
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpVerifying, setOtpVerifying] = useState(false);
@@ -232,13 +257,12 @@ export default function SecurityScreen({ navigation }) {
   const [canResendOtp, setCanResendOtp] = useState(false);
   const otpIntervalRef = useRef(null);
 
-  // Phone-OTP flow (used only for Email change — sent to the REGISTERED phone)
+  // Phone-OTP flow — used for: (a) verifying the CURRENT phone during an
+  // Email change, and (b) verifying the NEW phone during a Phone change.
   const [phoneOtpStep, setPhoneOtpStep] = useState(false);
   const [phoneOtpCode, setPhoneOtpCode] = useState('');
   const [phoneVerificationId, setPhoneVerificationId] = useState('');
 
-  // reCAPTCHA verifiers — web uses firebase/auth's RecaptchaVerifier bound
-  // to a hidden DOM node; native uses expo-firebase-recaptcha's modal.
   const nativeRecaptchaRef = useRef(null);
   const webVerifierWrapperRef = useRef(null);
 
@@ -347,7 +371,7 @@ export default function SecurityScreen({ navigation }) {
   const validateInputs = () => {
     if (activeLayer === 'password') {
       if (newPassword.length < 6) {
-        Alert.alert("Invalid Password", "Password must be at least 6 characters long.");
+        showAlert("Invalid Password", "Password must be at least 6 characters long.");
         return false;
       }
     }
@@ -356,7 +380,7 @@ export default function SecurityScreen({ navigation }) {
       const cleanPhone = newPhone;
       const { minLen } = selectedCountry;
       if (cleanPhone.length < minLen) {
-        Alert.alert("Invalid Phone Number", "The phone number entered is incomplete or incorrect.");
+        showAlert("Invalid Phone Number", "The phone number entered is incomplete or incorrect.");
         return false;
       }
     }
@@ -366,13 +390,13 @@ export default function SecurityScreen({ navigation }) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
       if (!emailRegex.test(emailLower) || emailLower.length < 5) {
-        Alert.alert("Invalid Email Format", "Please enter a valid email address structure.");
+        showAlert("Invalid Email Format", "Please enter a valid email address structure.");
         return false;
       }
 
       const domain = emailLower.split('@')[1];
       if (!ALLOWED_EMAIL_DOMAINS.includes(domain)) {
-        Alert.alert(
+        showAlert(
           "Unsupported Email Provider",
           "Temporary or untrusted email addresses are not permitted. Please use official providers like Gmail, Yahoo, or Outlook."
         );
@@ -380,7 +404,7 @@ export default function SecurityScreen({ navigation }) {
       }
 
       if (!currentPhone || currentPhone === 'Not Set') {
-        Alert.alert(
+        showAlert(
           "Phone Number Required",
           "For your security, email changes are verified via your registered phone number. Please add a phone number first (see the Phone section above), then try changing your email again."
         );
@@ -411,7 +435,34 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // --- PHONE change: now requires an EMAIL OTP first ---
+  // Real Firebase-side verification of a phone credential, whether or not
+  // this phone was ever linked before:
+  // - First time this phone is verified for this account -> linkWithCredential
+  //   (validates the code AND permanently ties the number to this UID).
+  // - Already linked from before -> Firebase rejects a second link with
+  //   'auth/provider-already-linked'; fall back to reauthenticateWithCredential
+  //   (still validates the code against Firebase's servers, and refreshes
+  //   the session's "recent login" status).
+  const verifyAndBindPhoneCredential = async (credential) => {
+    const user = auth.currentUser;
+    try {
+      await linkWithCredential(user, credential);
+    } catch (linkErr) {
+      if (linkErr.code === 'auth/provider-already-linked') {
+        await reauthenticateWithCredential(user, credential);
+      } else if (
+        linkErr.code === 'auth/credential-already-in-use' ||
+        linkErr.code === 'auth/phone-number-already-exists' ||
+        linkErr.code === 'auth/account-exists-with-different-credential'
+      ) {
+        throw { code: 'custom/phone-mismatch', message: 'This phone number is already associated with a different account and cannot be used here. Please contact support.' };
+      } else {
+        throw linkErr;
+      }
+    }
+  };
+
+  // --- PHONE change: Step 1) confirm identity via EMAIL OTP ---
   const sendPhoneChangeEmailOtp = async () => {
     setOtpSending(true);
     try {
@@ -421,13 +472,35 @@ export default function SecurityScreen({ navigation }) {
       setOtpCode('');
       startOtpTimer();
     } catch (err) {
-      Alert.alert("Error", err.message || "Failed to send verification code.");
+      showAlert("Error", err.message || "Failed to send verification code.");
     } finally {
       setOtpSending(false);
     }
   };
 
-  // --- EMAIL change: requires an SMS OTP sent to the REGISTERED phone ---
+  // --- PHONE change: Step 2) verify + bind the NEW phone number via SMS ---
+  const sendPhoneLinkOtp = async () => {
+    setOtpSending(true);
+    try {
+      const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
+      const verifierRef = getRecaptchaVerifierRef();
+      const res = await sendSMSOTP(fullPhone, verifierRef);
+      if (res.success) {
+        setPhoneVerificationId(res.verificationId);
+        setPhoneOtpCode('');
+        setPhoneOtpStep(true);
+        startOtpTimer();
+      } else {
+        showAlert("Error", res.message);
+      }
+    } catch (err) {
+      showAlert("Error", err.message || "Failed to send SMS code.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  // --- EMAIL change: verify the CURRENT registered phone via SMS ---
   const sendEmailChangePhoneOtp = async () => {
     setOtpSending(true);
     try {
@@ -439,10 +512,10 @@ export default function SecurityScreen({ navigation }) {
         setPhoneOtpStep(true);
         startOtpTimer();
       } else {
-        Alert.alert("Error", res.message);
+        showAlert("Error", res.message);
       }
     } catch (err) {
-      Alert.alert("Error", err.message || "Failed to send SMS code.");
+      showAlert("Error", err.message || "Failed to send SMS code.");
     } finally {
       setOtpSending(false);
     }
@@ -460,7 +533,7 @@ export default function SecurityScreen({ navigation }) {
         setOtpCode('');
         startOtpTimer();
       } catch (err) {
-        Alert.alert("Error", err.message || "Failed to send verification code.");
+        showAlert("Error", err.message || "Failed to send verification code.");
       } finally {
         setOtpSending(false);
       }
@@ -489,9 +562,9 @@ export default function SecurityScreen({ navigation }) {
         await sendOtp({ purpose: 'PHONE_CHANGE' });
       }
       startOtpTimer();
-      Alert.alert("Code Resent", "A new verification code has been sent to your email.");
+      showAlert("Code Resent", "A new verification code has been sent to your email.");
     } catch (err) {
-      Alert.alert("Error", err.message || "Failed to resend the code.");
+      showAlert("Error", err.message || "Failed to resend the code.");
     } finally {
       setOtpSending(false);
     }
@@ -499,12 +572,16 @@ export default function SecurityScreen({ navigation }) {
 
   const handleResendPhoneOtp = async () => {
     if (!canResendOtp) return;
-    await sendEmailChangePhoneOtp();
+    if (activeLayer === 'email') {
+      await sendEmailChangePhoneOtp();
+    } else if (activeLayer === 'phone') {
+      await sendPhoneLinkOtp();
+    }
   };
 
   const handleVerifyOtp = async () => {
     if (otpCode.length !== 6) {
-      Alert.alert("Invalid Code", "Please enter the 6-digit code.");
+      showAlert("Invalid Code", "Please enter the 6-digit code.");
       return;
     }
 
@@ -512,7 +589,7 @@ export default function SecurityScreen({ navigation }) {
     try {
       const user = auth.currentUser;
       if (!user) {
-        Alert.alert("Error", "Session expired. Please log in again.");
+        showAlert("Error", "Session expired. Please log in again.");
         setOtpVerifying(false);
         return;
       }
@@ -528,53 +605,67 @@ export default function SecurityScreen({ navigation }) {
         const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
         await verifyOtp({ email: user.email, code: otpCode, purpose: 'PHONE_CHANGE' });
 
-        const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
-        await updateDoc(doc(db, 'users', user.uid), { phone: fullPhone });
-        setCurrentPhone(fullPhone);
-
-        closeModal();
-        Alert.alert("Success", "Phone number updated successfully!");
+        // Identity confirmed via email — now verify + bind the NEW phone itself.
+        setOtpStep(false);
+        setOtpCode('');
+        stopOtpTimer();
+        await sendPhoneLinkOtp();
       }
     } catch (err) {
       if (err.code === 'auth/requires-recent-login') {
-        Alert.alert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
+        showAlert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
       } else {
-        Alert.alert("Verification Failed", err.message || "The code entered is invalid or has expired.");
+        showAlert("Verification Failed", err.message || "The code entered is invalid or has expired.");
       }
     } finally {
       setOtpVerifying(false);
     }
   };
 
-  const handleVerifyPhoneOtpForEmail = async () => {
+  // Verifies the SMS code for whichever flow is active and, on success,
+  // completes that flow (email change or phone change).
+  const handleVerifyPhoneOtp = async () => {
     if (phoneOtpCode.length !== 6) {
-      Alert.alert("Invalid Code", "Please enter the 6-digit code.");
+      showAlert("Invalid Code", "Please enter the 6-digit code.");
       return;
     }
 
     setOtpVerifying(true);
     try {
-      const result = await verifySMSOTP(phoneVerificationId, phoneOtpCode);
-      if (!result.success) {
-        Alert.alert("Verification Failed", result.message);
+      const buildResult = await verifySMSOTP(phoneVerificationId, phoneOtpCode);
+      if (!buildResult.success) {
+        showAlert("Verification Failed", buildResult.message);
         setOtpVerifying(false);
         return;
       }
 
+      await verifyAndBindPhoneCredential(buildResult.credential);
+
       const user = auth.currentUser;
-      const cleanEmail = newEmail.trim().toLowerCase();
 
-      await updateEmail(user, cleanEmail);
-      await updateDoc(doc(db, 'users', user.uid), { email: cleanEmail });
-      setCurrentEmail(cleanEmail);
-
-      closeModal();
-      forceReLogin("Your email address has been changed and verified successfully via your phone number. For your security, please log in again with your new email.");
+      if (activeLayer === 'email') {
+        const cleanEmail = newEmail.trim().toLowerCase();
+        await updateEmail(user, cleanEmail);
+        await updateDoc(doc(db, 'users', user.uid), { email: cleanEmail });
+        setCurrentEmail(cleanEmail);
+        closeModal();
+        forceReLogin("Your email address has been changed and verified successfully via your phone number. For your security, please log in again with your new email.");
+      } else if (activeLayer === 'phone') {
+        const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
+        await updateDoc(doc(db, 'users', user.uid), { phone: fullPhone });
+        setCurrentPhone(fullPhone);
+        closeModal();
+        showAlert("Success", "Phone number verified and updated successfully!");
+      }
     } catch (err) {
-      if (err.code === 'auth/requires-recent-login') {
-        Alert.alert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
+      if (err.code === 'auth/invalid-verification-code') {
+        showAlert("Verification Failed", "Incorrect code. Please check and try again.");
+      } else if (err.code === 'auth/code-expired') {
+        showAlert("Code Expired", "This code has expired. Please request a new code.");
+      } else if (err.code === 'auth/requires-recent-login') {
+        showAlert("Security Check", "This operation is sensitive and requires recent authentication. Log in again before retrying this request.");
       } else {
-        Alert.alert("Error", err.message || "Failed to update email.");
+        showAlert("Error", err.message || "Failed to complete verification.");
       }
     } finally {
       setOtpVerifying(false);
@@ -660,8 +751,9 @@ export default function SecurityScreen({ navigation }) {
                 <Text style={isDarkMode ? darkStyles.modalTitle : lightStyles.modalTitle}>
                   {activeLayer === 'password' && !otpStep && "Change Login Password"}
                   {activeLayer === 'password' && otpStep && "Verify Email OTP"}
-                  {activeLayer === 'phone' && !otpStep && "Change Phone Number"}
+                  {activeLayer === 'phone' && !otpStep && !phoneOtpStep && "Change Phone Number"}
                   {activeLayer === 'phone' && otpStep && "Verify Email OTP"}
+                  {activeLayer === 'phone' && phoneOtpStep && "Verify New Phone Number"}
                   {activeLayer === 'email' && !phoneOtpStep && "Change Email Address"}
                   {activeLayer === 'email' && phoneOtpStep && "Verify Phone OTP"}
                 </Text>
@@ -696,7 +788,7 @@ export default function SecurityScreen({ navigation }) {
                 </View>
               )}
 
-              {activeLayer === 'phone' && !otpStep && (
+              {activeLayer === 'phone' && !otpStep && !phoneOtpStep && (
                 <View style={styles.formContainer}>
                   <Text style={styles.currentActiveLabel}>Current Phone: {currentPhone}</Text>
                   <View style={styles.phoneInputRow}>
@@ -723,7 +815,7 @@ export default function SecurityScreen({ navigation }) {
                     />
                   </View>
                   <Text style={styles.infoAlert}>
-                    * For your security, a 6-digit code will be sent to your registered email ({currentEmail}) before this change is saved.
+                    * For your security, a code will be sent to your registered email ({currentEmail}) and then an SMS code to your new phone number, before this change is saved.
                   </Text>
                 </View>
               )}
@@ -776,10 +868,10 @@ export default function SecurityScreen({ navigation }) {
                 </View>
               )}
 
-              {activeLayer === 'email' && phoneOtpStep && (
+              {((activeLayer === 'email') || (activeLayer === 'phone')) && phoneOtpStep && (
                 <View style={styles.formContainer}>
                   <Text style={styles.currentActiveLabel}>
-                    We sent a 6-digit code via SMS to {currentPhone}
+                    We sent a 6-digit code via SMS to {activeLayer === 'email' ? currentPhone : `${selectedCountry.dial_code}${newPhone}`}
                   </Text>
                   <View style={styles.inputWrapper}>
                     <TextInput
@@ -818,12 +910,12 @@ export default function SecurityScreen({ navigation }) {
                       )}
                     </TouchableOpacity>
                   </>
-                ) : (activeLayer === 'email' && phoneOtpStep) ? (
+                ) : (((activeLayer === 'email') || (activeLayer === 'phone')) && phoneOtpStep) ? (
                   <>
                     <TouchableOpacity style={styles.cancelBtn} onPress={handleOtpCancel} disabled={otpVerifying}>
                       <Text style={styles.cancelBtnText}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.submitBtn} onPress={handleVerifyPhoneOtpForEmail} disabled={otpVerifying}>
+                    <TouchableOpacity style={styles.submitBtn} onPress={handleVerifyPhoneOtp} disabled={otpVerifying}>
                       {otpVerifying ? (
                         <ActivityIndicator color="#FFFFFF" />
                       ) : (
