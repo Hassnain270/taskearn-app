@@ -603,15 +603,18 @@ export default function SecurityScreen({ navigation }) {
         return;
       }
 
+      const cleanEmail = newEmail.trim().toLowerCase();
+
+      // Must confirm no OTHER account already has this email BEFORE
+      // touching Firebase Auth — this was the missing check that let a
+      // duplicate email get saved to Firestore, corrupting login lookups.
+      const checkAvailable = httpsCallable(functionsInstance, 'checkNewEmailAvailable');
+      await checkAvailable({ email: cleanEmail });
+
       await verifyAndBindPhoneCredential(buildResult.credential);
 
       const user = auth.currentUser;
-      const cleanEmail = newEmail.trim().toLowerCase();
 
-      // Firebase no longer allows changing email directly — it now
-      // requires the NEW email to be verified via a link Firebase sends
-      // to it. The actual change only takes effect once that link is
-      // clicked; until then, sign-in still requires the OLD email.
       await verifyBeforeUpdateEmail(user, cleanEmail);
       await updateDoc(doc(db, 'users', user.uid), { email: cleanEmail });
       setCurrentEmail(cleanEmail);
@@ -620,7 +623,9 @@ export default function SecurityScreen({ navigation }) {
         `A confirmation link has been sent to ${cleanEmail}. Please check that inbox and click the link to activate your new email, then log in again using your new email.`
       );
     } catch (err) {
-      if (err.code === 'auth/invalid-verification-code') {
+      if (err.code === 'functions/already-exists' || err.message?.includes('already linked to another account')) {
+        showAlert("Email Unavailable", "This email address is already linked to another account. Please use a different email.");
+      } else if (err.code === 'auth/invalid-verification-code') {
         showAlert("Verification Failed", "Incorrect code. Please check and try again.");
       } else if (err.code === 'auth/code-expired') {
         showAlert("Code Expired", "This code has expired. Please request a new code.");
