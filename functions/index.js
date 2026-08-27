@@ -1321,9 +1321,7 @@ exports.verifyEmailOTP = onCall(async (request) => {
 });
 
 // ============================================
-// WEBVIEW SESSION PASS — lets the Android app open a small in-app browser
-// window that is already logged in as the SAME user, so it can use the
-// phone-verification page (which only works reliably as a full web page).
+// WEBVIEW SESSION PASS
 // ============================================
 exports.issueWebViewSessionToken = onCall(async (request) => {
   if (!request.auth) {
@@ -1340,15 +1338,7 @@ exports.issueWebViewSessionToken = onCall(async (request) => {
 });
 
 // ============================================
-// PHONE OTP FALLBACK (Forgot Password) — server-side verification.
-// The client must call Firebase's signInWithCredential(auth, credential)
-// FIRST, which is the only way Firebase actually validates an SMS code
-// against its servers. If that succeeds, request.auth here is populated
-// with a REAL, Firebase-verified UID — proving both that the code was
-// correct AND that this phone number belongs to that specific account
-// (this only resolves to the correct account if the phone number was
-// previously linked to it via linkWithCredential during a Phone Number
-// change in the Security screen).
+// PHONE OTP FALLBACK (Forgot Password)
 // ============================================
 exports.issuePasswordResetTokenForPhone = onCall(async (request) => {
   if (!request.auth) {
@@ -1358,11 +1348,6 @@ exports.issuePasswordResetTokenForPhone = onCall(async (request) => {
   const uid = request.auth.uid;
   const db = admin.firestore();
 
-  // Defensive check: if this phone number was never verified/linked to a
-  // real TaskEarn account before (via Security > Change Phone Number),
-  // Firebase may have signed the user into a brand-new, unrelated identity
-  // instead of their actual account. Catch that here with a clear message
-  // rather than silently issuing a token for the wrong account.
   const userDoc = await db.collection("users").doc(uid).get();
   if (!userDoc.exists) {
     throw new HttpsError(
@@ -1382,10 +1367,7 @@ exports.issuePasswordResetTokenForPhone = onCall(async (request) => {
 });
 
 // ============================================
-// RESET PASSWORD — requires a valid, single-use resetToken issued by
-// either verifyEmailOTP (FORGOT_PASSWORD purpose) or
-// issuePasswordResetTokenForPhone above. Never trusts a client-supplied
-// UID directly.
+// RESET PASSWORD
 // ============================================
 exports.resetUserPassword = onCall(async (request) => {
   const { resetToken, newPassword } = request.data || {};
@@ -1420,6 +1402,30 @@ exports.resetUserPassword = onCall(async (request) => {
     console.error("Error resetting password:", error);
     throw new HttpsError("internal", "Failed to reset password. Please try again.");
   }
+});
+
+// ============================================
+// Prevents an email address from being assigned to more than one account
+// during "Change Email" — this check was previously missing, which
+// allowed a new email to be saved to Firestore even if it already
+// belonged to a different existing user, corrupting login lookups for
+// both accounts.
+// ============================================
+exports.checkNewEmailAvailable = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const { email } = request.data || {};
+  if (!email) throw new HttpsError("invalid-argument", "Email is required.");
+
+  const db = admin.firestore();
+  const cleanEmail = email.trim().toLowerCase();
+
+  const q = await db.collection("users").where("email", "==", cleanEmail).limit(1).get();
+  if (!q.empty && q.docs[0].id !== request.auth.uid) {
+    throw new HttpsError("already-exists", "This email address is already linked to another account.");
+  }
+
+  return { success: true, available: true };
 });
 
 // ============================================
