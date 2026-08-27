@@ -253,12 +253,10 @@ export default function SecurityScreen({ navigation }) {
   const [canResendOtp, setCanResendOtp] = useState(false);
   const otpIntervalRef = useRef(null);
 
-  // Web-only phone-OTP flow (direct RecaptchaVerifier)
   const [phoneOtpStep, setPhoneOtpStep] = useState(false);
   const [phoneOtpCode, setPhoneOtpCode] = useState('');
   const [phoneVerificationId, setPhoneVerificationId] = useState('');
 
-  // Native-only: shows the WebView bridge for phone verification
   const [bridgeVisible, setBridgeVisible] = useState(false);
 
   const webVerifierWrapperRef = useRef(null);
@@ -280,7 +278,12 @@ export default function SecurityScreen({ navigation }) {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
-            if (data.phone) setCurrentPhone(data.phone);
+            // Registration stores the phone number under "phoneNumber"
+            // (see RegisterScreen.js). This screen was previously reading
+            // "phone" instead, which never existed, so it always showed
+            // "Not Set" even for accounts with a valid registered number.
+            const savedPhone = data.phoneNumber || data.phone;
+            if (savedPhone) setCurrentPhone(savedPhone);
           }
         }
       } catch (err) {
@@ -465,8 +468,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Web: sends SMS directly via RecaptchaVerifier. Native: this isn't
-  // called — the bridge (WebView) is opened instead.
   const sendPhoneLinkOtp = async () => {
     setOtpSending(true);
     try {
@@ -617,7 +618,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Web-only: verifies the SMS code entered directly on this screen.
   const handleVerifyPhoneOtp = async () => {
     if (phoneOtpCode.length !== 6) {
       showAlert("Invalid Code", "Please enter the 6-digit code.");
@@ -646,7 +646,7 @@ export default function SecurityScreen({ navigation }) {
         forceReLogin("Your email address has been changed and verified successfully via your phone number. For your security, please log in again with your new email.");
       } else if (activeLayer === 'phone') {
         const fullPhone = `${selectedCountry.dial_code}${newPhone}`;
-        await updateDoc(doc(db, 'users', user.uid), { phone: fullPhone });
+        await updateDoc(doc(db, 'users', user.uid), { phoneNumber: fullPhone });
         setCurrentPhone(fullPhone);
         closeModal();
         showAlert("Success", "Phone number verified and updated successfully!");
@@ -666,9 +666,6 @@ export default function SecurityScreen({ navigation }) {
     }
   };
 
-  // Native-only: called when the WebView bridge reports success. The
-  // actual Firebase Auth + Firestore update already happened inside the
-  // WebView's own signed-in session — this just syncs local UI state.
   const handleBridgeResult = (data) => {
     setBridgeVisible(false);
 
@@ -908,8 +905,6 @@ export default function SecurityScreen({ navigation }) {
                   </View>
                 </View>
               )}
-
-              {Platform.OS !== 'web' && ((activeLayer === 'email' && !phoneOtpStep && !otpStep) || (activeLayer === 'phone' && otpStep === false && phoneOtpStep === false)) ? null : null}
 
               <View style={styles.modalActions}>
                 {((activeLayer === 'password' || activeLayer === 'phone') && otpStep) ? (

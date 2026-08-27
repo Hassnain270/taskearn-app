@@ -1301,10 +1301,6 @@ exports.verifyEmailOTP = onCall(async (request) => {
 
   await otpRef.delete();
 
-  // For FORGOT_PASSWORD, issue a short-lived, single-use reset token tied
-  // to the account's UID. resetUserPassword requires this token instead of
-  // trusting a client-supplied UID directly — otherwise anyone who knew a
-  // victim's UID could reset their password without ever verifying an OTP.
   if (purpose === "FORGOT_PASSWORD") {
     const userQuery = await db.collection("users").where("email", "==", email).limit(1).get();
     if (userQuery.empty) throw new HttpsError("not-found", "Account not found.");
@@ -1325,6 +1321,25 @@ exports.verifyEmailOTP = onCall(async (request) => {
 });
 
 // ============================================
+// WEBVIEW SESSION PASS — lets the Android app open a small in-app browser
+// window that is already logged in as the SAME user, so it can use the
+// phone-verification page (which only works reliably as a full web page).
+// ============================================
+exports.issueWebViewSessionToken = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "User must be logged in.");
+  }
+
+  try {
+    const customToken = await admin.auth().createCustomToken(request.auth.uid);
+    return { success: true, token: customToken };
+  } catch (error) {
+    console.error("Error issuing WebView session token:", error);
+    throw new HttpsError("internal", "Failed to prepare secure session.");
+  }
+});
+
+// ============================================
 // PHONE OTP FALLBACK (Forgot Password) — server-side verification.
 // The client must call Firebase's signInWithCredential(auth, credential)
 // FIRST, which is the only way Firebase actually validates an SMS code
@@ -1342,6 +1357,19 @@ exports.issuePasswordResetTokenForPhone = onCall(async (request) => {
 
   const uid = request.auth.uid;
   const db = admin.firestore();
+
+  // Defensive check: if this phone number was never verified/linked to a
+  // real TaskEarn account before (via Security > Change Phone Number),
+  // Firebase may have signed the user into a brand-new, unrelated identity
+  // instead of their actual account. Catch that here with a clear message
+  // rather than silently issuing a token for the wrong account.
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) {
+    throw new HttpsError(
+      "failed-precondition",
+      "This phone number has not been verified for your account yet. Please log in and verify your phone number once from Security settings, then try Forgot Password again."
+    );
+  }
 
   const resetToken = db.collection("passwordResetTokens").doc().id;
   await db.collection("passwordResetTokens").doc(resetToken).set({
@@ -1477,22 +1505,3 @@ exports.chatWithSupportAI = onCall(
     }
   }
 );
-
-// ============================================
-// WEBVIEW SESSION PASS — lets the Android app open a small in-app browser
-// window that is already logged in as the SAME user, so it can use the
-// phone-verification page (which only works reliably as a full web page).
-// ============================================
-exports.issueWebViewSessionToken = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "User must be logged in.");
-  }
-
-  try {
-    const customToken = await admin.auth().createCustomToken(request.auth.uid);
-    return { success: true, token: customToken };
-  } catch (error) {
-    console.error("Error issuing WebView session token:", error);
-    throw new HttpsError("internal", "Failed to prepare secure session.");
-  }
-});
