@@ -110,6 +110,12 @@ const subscribeToWebURLChanges = (listener) => {
   };
 };
 
+// PhoneVerify is only ever reached with two purposes now: "email_change"
+// (Security > Change Email, verified via the CURRENT registered phone) and
+// "forgot_password" (Login > Forgot Password, only after 5 failed email
+// attempts). "phone_change" was dropped since Phone Number changes no
+// longer use SMS at all (Email OTP only), so newPhone/dialCode params are
+// no longer needed here.
 const linking = {
   prefixes: [
     prefix,
@@ -131,8 +137,6 @@ const linking = {
           token: (v) => v,
           phone: (v) => v,
           newEmail: (v) => v,
-          newPhone: (v) => v,
-          dialCode: (v) => v,
         },
       },
     },
@@ -279,11 +283,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     padding: 15,
     borderRadius: 8,
-  },
-  errorText: {
-    color: '#FFD700',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   errorSubText: {
     color: '#FFF',

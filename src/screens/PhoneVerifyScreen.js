@@ -14,10 +14,14 @@ import { auth, db } from '../firebaseConfig';
 
 const functionsInstance = getFunctions();
 
-// If this page is running inside the Android app's WebView, this sends the
-// result back to the app. If it's opened in a normal browser (not inside
-// the app), window.ReactNativeWebView won't exist, so this simply does
-// nothing — harmless either way.
+// This page is only ever reached for two purposes now:
+// - "email_change": verifies the user's CURRENT registered phone before
+//   changing their email (Security screen).
+// - "forgot_password": the rare phone fallback in Login > Forgot Password,
+//   only offered after 5 failed email attempts.
+// ("phone_change" was removed — Phone Number changes now use Email OTP
+// only, no SMS at all, to conserve the monthly SMS quota.)
+
 const postResultToApp = (result) => {
   if (typeof window !== 'undefined' && window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify(result));
@@ -26,15 +30,13 @@ const postResultToApp = (result) => {
 
 export default function PhoneVerifyScreen({ route }) {
   const params = route?.params || {};
-  const { purpose, token, phone, newEmail, newPhone, dialCode } = params;
+  const { purpose, token, phone, newEmail } = params;
 
   const [status, setStatus] = useState('signing_in');
   const [errorMsg, setErrorMsg] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [verificationId, setVerificationId] = useState('');
   const verifierRef = useRef(null);
-
-  const targetPhone = purpose === 'phone_change' ? `${dialCode}${newPhone}` : phone;
 
   useEffect(() => {
     const init = async () => {
@@ -69,7 +71,7 @@ export default function PhoneVerifyScreen({ route }) {
         verifierRef.current = new RecaptchaVerifier(auth, 'phone-verify-recaptcha', { size: 'invisible' });
       }
       const phoneProvider = new PhoneAuthProvider(auth);
-      const vId = await phoneProvider.verifyPhoneNumber(targetPhone, verifierRef.current);
+      const vId = await phoneProvider.verifyPhoneNumber(phone, verifierRef.current);
       setVerificationId(vId);
       setStatus('awaiting_code');
     } catch (err) {
@@ -126,15 +128,6 @@ export default function PhoneVerifyScreen({ route }) {
         return;
       }
 
-      if (purpose === 'phone_change') {
-        await verifyAndBindPhoneCredential(credential);
-        const user = auth.currentUser;
-        await updateDoc(doc(db, 'users', user.uid), { phone: targetPhone });
-        setStatus('done');
-        postResultToApp({ success: true, purpose });
-        return;
-      }
-
       throw new Error('Unknown verification purpose.');
     } catch (err) {
       setStatus('awaiting_code');
@@ -158,14 +151,14 @@ export default function PhoneVerifyScreen({ route }) {
           <View style={styles.centerBox}>
             <ActivityIndicator size="large" color="#3B82F6" />
             <Text style={styles.subText}>
-              {status === 'signing_in' ? 'Preparing secure session...' : `Sending code to ${targetPhone}...`}
+              {status === 'signing_in' ? 'Preparing secure session...' : `Sending code to ${phone}...`}
             </Text>
           </View>
         )}
 
         {status === 'awaiting_code' && (
           <View style={styles.centerBox}>
-            <Text style={styles.subText}>Enter the 6-digit code sent to {targetPhone}</Text>
+            <Text style={styles.subText}>Enter the 6-digit code sent to {phone}</Text>
             <TextInput
               style={styles.input}
               placeholder="123456"
