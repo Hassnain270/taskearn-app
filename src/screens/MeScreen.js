@@ -256,6 +256,24 @@ export default function MeScreen({ navigation }) {
                 </View>
                 <Feather name="chevron-right" size={16} color="#2563EB" />
               </TouchableOpacity>
+
+              <View style={currentStyles.divider} />
+
+              <TouchableOpacity
+                style={currentStyles.optionItem}
+                activeOpacity={0.7}
+                onPress={() => safeNavigate('AdminBonusConfigScreen')}
+              >
+                <View style={styles.optionLeft}>
+                  <View style={[currentStyles.iconWrapper, { backgroundColor: isDarkMode ? '#1E293B' : '#EFF6FF' }]}>
+                    <Feather name="percent" size={16} color="#2563EB" />
+                  </View>
+                  <Text style={[currentStyles.optionTitle, { color: '#2563EB', fontWeight: '700' }]}>
+                    Bonus Settings
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={16} color="#2563EB" />
+              </TouchableOpacity>
             </View>
           </>
         )}
