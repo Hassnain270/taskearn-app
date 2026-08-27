@@ -1429,6 +1429,28 @@ exports.checkNewEmailAvailable = onCall(async (request) => {
 });
 
 // ============================================
+// Same protection as checkNewEmailAvailable, but for phone numbers —
+// prevents a phone number from being assigned to more than one account
+// during "Change Phone Number".
+// ============================================
+exports.checkNewPhoneAvailable = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const { phone } = request.data || {};
+  if (!phone) throw new HttpsError("invalid-argument", "Phone number is required.");
+
+  const db = admin.firestore();
+  const cleanPhone = phone.trim();
+
+  const q = await db.collection("users").where("phoneNumber", "==", cleanPhone).limit(1).get();
+  if (!q.empty && q.docs[0].id !== request.auth.uid) {
+    throw new HttpsError("already-exists", "This phone number is already linked to another account.");
+  }
+
+  return { success: true, available: true };
+});
+
+// ============================================
 // CHAT WITH SUPPORT AI (GROQ - MULTI-MODEL FALLBACK CHAIN)
 // ============================================
 
