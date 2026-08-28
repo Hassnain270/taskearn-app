@@ -44,6 +44,12 @@ export default function TasksScreen({ navigation }) {
 
   const [selectedProduct, setSelectedProduct] = useState({ name: '', icon: 'cart', price: 0 });
 
+  // Defaults to the standard rate while the real value loads from the
+  // central config, so the estimate shown before confirming a task is
+  // never wrong for more than a moment. The actual credited amount always
+  // comes from the backend's own (equally centralized) calculation.
+  const [dailyTaskProfitRate, setDailyTaskProfitRate] = useState(0.0032);
+
   const cycleKeyRef = useRef(null);
 
   // Local activity storage is scoped per user UID, so different accounts
@@ -158,6 +164,21 @@ export default function TasksScreen({ navigation }) {
     };
   }, []);
 
+  useEffect(() => {
+    const loadBonusRate = async () => {
+      try {
+        const getBonusConfig = httpsCallable(functionsInstance, 'getBonusConfig');
+        const res = await getBonusConfig();
+        if (typeof res.data?.rates?.dailyTaskProfitRate === 'number') {
+          setDailyTaskProfitRate(res.data.rates.dailyTaskProfitRate);
+        }
+      } catch (err) {
+        // Keep the default rate if this fails — never block the task flow.
+      }
+    };
+    loadBonusRate();
+  }, []);
+
   // Local, per-user "Recent Activity" list. Persists across navigating away
   // and back to this screen, and across logging out and back in on the same
   // device — but automatically clears once the daily task cycle rolls over.
@@ -250,7 +271,7 @@ export default function TasksScreen({ navigation }) {
       clearInterval(statusInterval);
       setCurrentStepIndex(serverSteps.length - 1);
       const randomProduct = productPool[Math.floor(Math.random() * productPool.length)];
-      const finalProfit = parseFloat((balance * 0.0032).toFixed(2));
+      const finalProfit = parseFloat((balance * dailyTaskProfitRate).toFixed(2));
       const randomID = Math.floor(100000 + Math.random() * 900000).toString();
 
       setSelectedProduct({
