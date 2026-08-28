@@ -608,11 +608,6 @@ exports.adminUpdateUserData = onCall(async (request) => {
       throw new HttpsError("already-exists", "This wallet address is already linked to another account.");
     }
 
-    // Automatically detect the network from the address format instead of
-    // requiring the admin to pick it manually — this guarantees the stored
-    // walletNetwork always matches the actual address, which matters
-    // because withdrawal payouts are routed based on walletNetwork, not
-    // the address itself.
     let detectedNetwork = null;
     if (/^T[a-zA-Z0-9]{33}$/.test(cleanWallet)) {
       detectedNetwork = "TRC20";
@@ -1515,6 +1510,10 @@ exports.completeTask = onCall(async (request) => {
 
 // ============================================
 // EMAIL OTP — sent via Brevo's transactional email API.
+// A 45-second server-side cooldown per email prevents anyone from
+// calling this function repeatedly (bypassing the app's own 60-second
+// resend timer) to spam OTP emails and burn through the monthly Brevo
+// send quota.
 // ============================================
 
 exports.sendEmailOTP = onCall(
@@ -1535,13 +1534,26 @@ exports.sendEmailOTP = onCall(
 
     if (!targetEmail) throw new HttpsError("invalid-argument", "Email address is required.");
 
+    const otpRef = db.collection("otps").doc(targetEmail);
+    const existingOtpDoc = await otpRef.get();
+    if (existingOtpDoc.exists) {
+      const existingSentAt = existingOtpDoc.data().sentAt || 0;
+      if (Date.now() - existingSentAt < 45000) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Please wait a moment before requesting another code."
+        );
+      }
+    }
+
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 5 * 60 * 1000;
 
-    await db.collection("otps").doc(targetEmail).set({
+    await otpRef.set({
       code: otpCode,
       purpose: purpose,
       expiresAt: expiresAt,
+      sentAt: Date.now(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 

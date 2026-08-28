@@ -8,13 +8,19 @@ service cloud.firestore {
     // Client (app) is allowed to read its own document and update
     // only "safe" profile-type fields. Money fields (balance,
     // taskCount, todayEarnings, totalEarnings, tronAddress,
-    // walletIndex, vip status) AND walletAddress/walletNetwork can
-    // ONLY be written by the Admin SDK (Cloud Functions), never
-    // directly by the client. Any cross-user lookup (login by
-    // username, registration uniqueness checks, wallet uniqueness)
-    // is handled by dedicated Cloud Functions instead of direct
-    // client queries, since those must run BEFORE the user is
-    // authenticated or need to see OTHER users' data.
+    // walletIndex, vip status), walletAddress/walletNetwork, AND
+    // isAdmin can ONLY be written by the Admin SDK (Cloud Functions),
+    // never directly by the client. This is also enforced at account
+    // CREATION time (not just update) — a user creating their own
+    // document during registration cannot include any of these
+    // fields, which most importantly prevents a user from setting
+    // isAdmin: true on their own new account.
+    //
+    // Any cross-user lookup (login by username, registration
+    // uniqueness checks, wallet uniqueness, admin user search) is
+    // handled by dedicated Cloud Functions instead of direct client
+    // queries, since those must run BEFORE the user is authenticated
+    // or need to see OTHER users' data.
     // ---------------------------------------------------------------
     match /users/{userId} {
 
@@ -22,20 +28,38 @@ service cloud.firestore {
 
       allow create: if request.auth != null
                     && request.auth.uid == userId
+                    && !('isAdmin' in request.resource.data)
                     && !('balance' in request.resource.data)
+                    && !('totalBalance' in request.resource.data)
                     && !('taskCount' in request.resource.data)
                     && !('todayEarnings' in request.resource.data)
                     && !('totalEarnings' in request.resource.data)
+                    && !('totalWithdraw' in request.resource.data)
+                    && !('teamReward' in request.resource.data)
                     && !('tronAddress' in request.resource.data)
-                    && !('walletAddress' in request.resource.data);
+                    && !('walletAddress' in request.resource.data)
+                    && !('walletNetwork' in request.resource.data)
+                    && !('walletAddressUpdatedAt' in request.resource.data)
+                    && !('lastClaimedVipLevel' in request.resource.data)
+                    && !('hasDeposited' in request.resource.data)
+                    && !('lastAdminEditBy' in request.resource.data)
+                    && !('lastAdminEditAt' in request.resource.data);
 
+      // Only these plain profile fields may ever be changed directly
+      // by the client. Email and phone number changes are intended to
+      // go through the app's OTP-verified flow before this write
+      // happens, and isAdmin can never be touched here at all —
+      // "phoneNumber" is included (matching the field name actually
+      // used at registration) alongside the older "phone" name for
+      // compatibility.
       allow update: if request.auth != null
                     && request.auth.uid == userId
                     && request.resource.data.diff(resource.data).affectedKeys()
                          .hasOnly([
-                           'phone', 'email', 'displayName',
+                           'phone', 'phoneNumber', 'email', 'displayName',
                            'fullName', 'gender', 'dobText'
-                         ]);
+                         ])
+                    && !('isAdmin' in request.resource.data.diff(resource.data).affectedKeys());
 
       allow delete: if false;
     }
@@ -84,7 +108,13 @@ service cloud.firestore {
       allow read, write: if false; // server-only
     }
 
-    // Deny everything else by default.
+    // Deny everything else by default. This correctly and safely
+    // covers every collection added since these rules were first
+    // written — config/bonusRates, otps/{email},
+    // passwordResetTokens/{token}, and users/{uid}/bonuses/{id} — none
+    // of which are ever accessed directly by client code (only by
+    // Cloud Functions via the Admin SDK, which bypasses these rules
+    // entirely), so no explicit rule is needed for them.
     match /{document=**} {
       allow read, write: if false;
     }
