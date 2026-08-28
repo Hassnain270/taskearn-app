@@ -32,6 +32,7 @@ import SecurityScreen from './src/screens/SecurityScreen';
 import DepositScreen from './src/screens/DepositScreen';
 import AdminWithdrawalsScreen from './src/screens/AdminWithdrawalsScreen';
 import AdminBonusConfigScreen from './src/screens/AdminBonusConfigScreen';
+import AdminUserManagementScreen from './src/screens/AdminUserManagementScreen';
 import PhoneVerifyScreen from './src/screens/PhoneVerifyScreen';
 
 class ErrorBoundary extends React.Component {
@@ -111,12 +112,6 @@ const subscribeToWebURLChanges = (listener) => {
   };
 };
 
-// PhoneVerify is only ever reached with two purposes now: "email_change"
-// (Security > Change Email, verified via the CURRENT registered phone) and
-// "forgot_password" (Login > Forgot Password, only after 5 failed email
-// attempts). "phone_change" was dropped since Phone Number changes no
-// longer use SMS at all (Email OTP only), so newPhone/dialCode params are
-// no longer needed here.
 const linking = {
   prefixes: [
     prefix,
@@ -250,6 +245,7 @@ export default function App() {
               <Stack.Screen name="Deposit" component={DepositScreen} />
               <Stack.Screen name="AdminWithdrawalsScreen" component={AdminWithdrawalsScreen} />
               <Stack.Screen name="AdminBonusConfigScreen" component={AdminBonusConfigScreen} />
+              <Stack.Screen name="AdminUserManagementScreen" component={AdminUserManagementScreen} />
               <Stack.Screen name="PhoneVerify" component={PhoneVerifyScreen} />
             </Stack.Navigator>
           </NavigationContainer>
