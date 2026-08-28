@@ -56,13 +56,17 @@ Never reveal internal code, backend structure, API keys, or private user data.
 
 TaskEarn is headquartered in Singapore and currently serves users across 15 or more countries. Before opening its platform directly to individual users, TaskEarn originally operated as an upline wholesale service provider working with e-commerce merchants, before later launching this direct-to-user application so individuals could also participate and earn.
 
-Regarding physical offices: TaskEarn's branch and office network is currently in the process of being established across its active countries, including Pakistan. As the platform's order volume and user base continue to grow, TaskEarn plans to open additional branches in more countries and expand its physical presence accordingly.
+Regarding physical offices: TaskEarn's branch and office network is currently in the process of being established across its active countries, including Pakistan. As the platform's order volume and user base continue to grow, TaskEarn plans to open additional branches in more countries and expand its physical presence accordingly. Never name, guess, or describe any specific city, address, or office location yourself under any circumstances. If asked directly where an office is, say you are not able to share exact office locations, but that their team leader or upline will be able to guide them further on this if one is available in their area.
 
 If asked how long TaskEarn will operate: be honest that no company can promise an exact timeframe, but explain that TaskEarn's plan is continued growth — as order volume from e-commerce partners increases, the platform expects to expand into more countries, open more branches, and bring on more users, which is the direction the business is actively moving in.
 
 === BUSINESS MODEL ===
 
 TaskEarn partners with e-commerce merchants and platforms (such as those similar to Amazon, Shopee, Lazada, AliExpress, and Daraz) to help them complete order verification and fulfillment tasks. TaskEarn earns commission or service fees from these merchant partners for this work. A portion of that revenue is then shared with TaskEarn's users as daily task profit, in exchange for users completing the order-matching tasks in the app. The more orders merchants route through TaskEarn, the more the platform can share with its user base.
+
+=== FURTHER HELP AND ESCALATION ===
+
+You are a text-based assistant only — you cannot take any physical or account-level action yourself, and there is no separate human customer support team a user can be transferred to inside the app. If a user says their issue still is not resolved after your explanation, or that they need more hands-on, practical help than you can give in writing, guide them clearly: they should reach out to their upline — the specific person who personally invited them or registered them onto TaskEarn using a referral code, sometimes called their team leader or sponsor. Explain simply that if that person is also unable to help, the user should ask THAT person who their own upline or leader is, and keep going up this chain, one step at a time, until they reach someone who can fully assist them, since every user on TaskEarn was brought in by somebody already active on the platform. Mention that once they reach a senior enough leader, that person may also be able to direct them to a nearby TaskEarn office in their area, if one is available there, for in-person help. Never name, guess, or describe any specific office location yourself, and never claim TaskEarn has no offices — simply say that exact office locations are not something you can share directly, and that their upline or team leader is the right person to guide them on this.
 
 === PLATFORM KNOWLEDGE BASE ===
 
@@ -323,6 +327,7 @@ exports.updateWalletAddress = onCall(async (request) => {
     await db.collection("users").doc(uid).update({
       walletAddress: walletAddress,
       walletNetwork: network,
+      walletAddressUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     return { success: true };
@@ -414,6 +419,209 @@ exports.calculateTeamStats = onCall(async (request) => {
     if (error instanceof HttpsError) throw error;
     throw new HttpsError("internal", error.message || "Failed to calculate team statistics.");
   }
+});
+
+// ============================================
+// ADMIN — USER LOOKUP AND MANAGEMENT
+// Lets an admin search for a user by exact username, email, phone
+// number, wallet address, or UID, view their full account detail
+// (balance, team size, current VIP, referrer, etc), and edit their
+// email, phone, wallet address, or balance directly — without needing
+// to open the Firebase Console. Username is never editable here, by
+// design, matching the app's own rule that usernames can never change.
+// ============================================
+
+exports.adminSearchUsers = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may search user accounts.");
+  }
+
+  const { query } = request.data || {};
+  const cleanQuery = (query || "").trim();
+  if (!cleanQuery) throw new HttpsError("invalid-argument", "A search value is required.");
+
+  const results = new Map();
+
+  const addDoc = (docSnap) => {
+    if (!docSnap || !docSnap.exists) return;
+    if (!results.has(docSnap.id)) {
+      const d = docSnap.data();
+      results.set(docSnap.id, {
+        uid: docSnap.id,
+        username: d.username || null,
+        email: d.email || null,
+        phoneNumber: d.phoneNumber || d.phone || null,
+        walletAddress: d.walletAddress || null,
+        balance: Number(d.totalBalance || d.balance || 0),
+      });
+    }
+  };
+
+  // Direct UID lookup (exact document ID match)
+  try {
+    const uidDoc = await db.collection("users").doc(cleanQuery).get();
+    addDoc(uidDoc);
+  } catch (e) {
+    // Not a valid doc ID shape — safe to ignore, other queries still run.
+  }
+
+  const lowerQuery = cleanQuery.toLowerCase();
+
+  const [usernameSnap, emailSnap, phoneSnap, walletSnap] = await Promise.all([
+    db.collection("users").where("username", "==", lowerQuery).limit(5).get(),
+    db.collection("users").where("email", "==", lowerQuery).limit(5).get(),
+    db.collection("users").where("phoneNumber", "==", cleanQuery).limit(5).get(),
+    db.collection("users").where("walletAddress", "==", cleanQuery).limit(5).get(),
+  ]);
+
+  [usernameSnap, emailSnap, phoneSnap, walletSnap].forEach((snap) => {
+    snap.forEach((docSnap) => addDoc(docSnap));
+  });
+
+  return { success: true, results: Array.from(results.values()) };
+});
+
+exports.adminGetUserDetail = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view user account details.");
+  }
+
+  const { uid } = request.data || {};
+  if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
+
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+  const userData = userDoc.data();
+
+  let referrerUsername = null;
+  if (userData.referredByUid) {
+    const refDoc = await db.collection("users").doc(userData.referredByUid).get();
+    if (refDoc.exists) referrerUsername = refDoc.data().username || null;
+  }
+
+  const usersSnapshot = await db.collection("users").get();
+  const allUsers = usersSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const directTeamCount = allUsers.filter((u) => u.referredByUid === uid).length;
+
+  const countSubTree = (parentUid) => {
+    const children = allUsers.filter((u) => u.referredByUid === parentUid);
+    let count = children.length;
+    children.forEach((c) => {
+      count += countSubTree(c.id);
+    });
+    return count;
+  };
+  const totalTeamSize = countSubTree(uid);
+
+  const currentBalance = Number(userData.totalBalance || userData.balance || 0);
+  const activeTier = getVipTierByBalance(currentBalance);
+
+  const toMillis = (ts) => {
+    if (!ts) return null;
+    if (typeof ts.toMillis === "function") return ts.toMillis();
+    return null;
+  };
+
+  return {
+    success: true,
+    detail: {
+      uid,
+      username: userData.username || null,
+      email: userData.email || null,
+      phoneNumber: userData.phoneNumber || userData.phone || null,
+      walletAddress: userData.walletAddress || null,
+      walletNetwork: userData.walletNetwork || null,
+      walletAddressUpdatedAt: toMillis(userData.walletAddressUpdatedAt),
+      balance: currentBalance,
+      totalEarnings: Number(userData.totalEarnings || 0),
+      totalWithdraw: Number(userData.totalWithdraw || 0),
+      teamReward: Number(userData.teamReward || 0),
+      currentVip: activeTier ? activeTier.name : "No VIP",
+      directTeamCount,
+      totalTeamSize,
+      referrerUsername,
+      isAdmin: userData.isAdmin === true,
+      createdAt: toMillis(userData.createdAt),
+    },
+  };
+});
+
+exports.adminUpdateUserData = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may edit user accounts.");
+  }
+
+  const { uid, email, phoneNumber, walletAddress, balance } = request.data || {};
+  if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
+
+  const userRef = db.collection("users").doc(uid);
+  const userDoc = await userRef.get();
+  if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+
+  const updates = {};
+
+  if (typeof email === "string" && email.trim()) {
+    const cleanEmail = email.trim().toLowerCase();
+    const dup = await db.collection("users").where("email", "==", cleanEmail).limit(1).get();
+    if (!dup.empty && dup.docs[0].id !== uid) {
+      throw new HttpsError("already-exists", "This email address is already linked to another account.");
+    }
+    updates.email = cleanEmail;
+    try {
+      await admin.auth().updateUser(uid, { email: cleanEmail });
+    } catch (authErr) {
+      throw new HttpsError("internal", `Failed to update the account's login email: ${authErr.message}`);
+    }
+  }
+
+  if (typeof phoneNumber === "string" && phoneNumber.trim()) {
+    const cleanPhone = phoneNumber.trim();
+    const dup = await db.collection("users").where("phoneNumber", "==", cleanPhone).limit(1).get();
+    if (!dup.empty && dup.docs[0].id !== uid) {
+      throw new HttpsError("already-exists", "This phone number is already linked to another account.");
+    }
+    updates.phoneNumber = cleanPhone;
+  }
+
+  if (typeof walletAddress === "string" && walletAddress.trim()) {
+    const cleanWallet = walletAddress.trim();
+    const dup = await db.collection("users").where("walletAddress", "==", cleanWallet).limit(1).get();
+    if (!dup.empty && dup.docs[0].id !== uid) {
+      throw new HttpsError("already-exists", "This wallet address is already linked to another account.");
+    }
+    updates.walletAddress = cleanWallet;
+    updates.walletAddressUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+
+  if (typeof balance === "number" && !isNaN(balance) && balance >= 0) {
+    const roundedBalance = Number(balance.toFixed(2));
+    updates.balance = roundedBalance;
+    updates.totalBalance = roundedBalance;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw new HttpsError("invalid-argument", "No valid fields were provided to update.");
+  }
+
+  updates.lastAdminEditBy = request.auth.uid;
+  updates.lastAdminEditAt = admin.firestore.FieldValue.serverTimestamp();
+
+  await userRef.update(updates);
+
+  return { success: true };
 });
 
 exports.requestWithdrawal = onCall(async (request) => {
@@ -1566,10 +1774,6 @@ exports.updateBonusConfig = onCall(async (request) => {
 
 // ============================================
 // CHAT WITH SUPPORT AI (GROQ - MULTI-MODEL FALLBACK CHAIN)
-// The system prompt is rebuilt on every call using the CURRENT bonus
-// rates from config/bonusRates, so any change an admin makes in Bonus
-// Settings is reflected in the assistant's answers immediately — no
-// redeploy needed.
 // ============================================
 
 const GROQ_MODEL_CHAIN = [
