@@ -13,13 +13,21 @@ import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
+
+const functionsInstance = getFunctions();
 
 export default function VipScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
   const [totalBalance, setTotalBalance] = useState(route?.params?.totalBalance || 0.00);
   const [loading, setLoading] = useState(true);
+
+  // Defaults to the standard rate while the real value loads from the
+  // central config, so the displayed upgrade bonuses are never wrong for
+  // more than a moment.
+  const [vipUpgradeRate, setVipUpgradeRate] = useState(0.05);
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -39,6 +47,21 @@ export default function VipScreen({ navigation, route }) {
     } else {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const loadBonusRate = async () => {
+      try {
+        const getBonusConfig = httpsCallable(functionsInstance, 'getBonusConfig');
+        const res = await getBonusConfig();
+        if (typeof res.data?.rates?.vipUpgradeRate === 'number') {
+          setVipUpgradeRate(res.data.rates.vipUpgradeRate);
+        }
+      } catch (err) {
+        // Keep the default rate if this fails — never block the screen.
+      }
+    };
+    loadBonusRate();
   }, []);
 
   const getActiveVipId = (balance) => {
@@ -74,7 +97,7 @@ export default function VipScreen({ navigation, route }) {
     if (targetItem.id <= activeVipId) return 0;
     const currentMinCapital = activeVipId > 0 ? (vipData.find(v => v.id === activeVipId)?.minCapital || 0) : 0;
     const capitalDiff = targetItem.minCapital - currentMinCapital;
-    return capitalDiff > 0 ? Number((capitalDiff * 0.05).toFixed(2)) : 0;
+    return capitalDiff > 0 ? Number((capitalDiff * vipUpgradeRate).toFixed(2)) : 0;
   };
 
   const activeVipObj = vipData.find(v => v.id === activeVipId);
