@@ -277,8 +277,8 @@ export default function DepositScreen({ navigation }) {
               <Text style={currentStyles.summaryValue}>+{bonusAmount} USDT</Text>
             </View>
             <View style={[styles.summaryRow, currentStyles.totalRowBorder]}>
-              <Text style={styles.totalLabel}>Total Expected Balance:</Text>
-              <Text style={currentStyles.totalValue}>${totalAmount} USDT</Text>
+              <Text style={currentStyles.totalLabel}>Total Expected Balance:</Text>
+              <Text style={styles.totalValue}>${totalAmount} USDT</Text>
             </View>
           </View>
         )}
