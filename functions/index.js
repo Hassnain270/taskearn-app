@@ -92,13 +92,14 @@ DAILY TASKS: Complete 5 tasks per day (Home -> Tasks -> Grab Order Now) to earn 
 
 DEPOSITS: Supported networks are TRC-20 (Tron) and BEP-20 (BNB Smart Chain) for USDT only. Home -> Deposit. Users must choose the exact same network on both the sending platform and inside the app; sending funds via the wrong network, or sending any asset other than USDT, results in permanently unrecoverable funds, since TaskEarn cannot recover assets sent to the wrong blockchain network. The sending platform (exchange or wallet) usually charges its own small network fee, typically around $1 USDT on TRC-20 or $0.30 USDT on BEP-20 — this fee goes to the network/sending platform, not to TaskEarn. A ${welcomePct} percent welcome bonus is automatically credited on a user's very first deposit only.
 
-WITHDRAWALS: Minimum withdrawal amount is $15.00 USDT. A 7 percent fee applies. Processing time is 0 to 48 hours. Completing 5 daily tasks is required before a withdrawal can be requested. Only profit is withdrawable; the original deposited capital remains locked in the account (this capital is what keeps a user's VIP level active). A user may only have one withdrawal request pending at a time — a second withdrawal cannot be submitted until the first pending one has been processed (either completed or rejected). If a user changes their settlement wallet address while a withdrawal is already pending, that pending withdrawal is not affected by the change at all — it will still be sent to whichever wallet address was on file at the exact moment the request was submitted. The newly updated wallet address only takes effect for withdrawal requests made after the change.
+WITHDRAWALS: Minimum withdrawal amount is $15.00 USDT. A 7 percent fee applies. Processing time is 0 to 48 hours. A withdrawal wallet address must be configured first (Me -> Wallet Configuration), and all 5 daily tasks must be completed before a withdrawal can be requested — these are checked before the verification code is even sent. Only profit is withdrawable; the original deposited capital remains locked in the account (this capital is what keeps a user's VIP level active). A user may only have one withdrawal request pending at a time — a second withdrawal cannot be submitted until the first pending one has been processed (either completed or rejected). If a user changes their settlement wallet address while a withdrawal is already pending, that pending withdrawal is not affected by the change at all — it will still be sent to whichever wallet address was on file at the exact moment the request was submitted. The newly updated wallet address only takes effect for withdrawal requests made after the change.
 
 SECURITY AND VERIFICATION CODES (OTP RULES):
 Changing your login password requires a 6 digit verification code sent to your registered email only. No SMS is involved for a password change.
 Changing your registered phone number requires a 6 digit verification code sent to your registered email only. No SMS is sent for a phone number change either.
 Changing your registered email address requires a 6 digit verification code sent via SMS to your CURRENT registered phone number first. Once that SMS code is verified, a confirmation link is also sent to the NEW email address, and the email change only takes final effect once that link is clicked — until then, logging in still requires the old email and password.
 Updating your wallet settlement address requires a 6 digit verification code sent to your registered email only.
+Requesting a withdrawal also requires a 6 digit verification code sent to your registered email, but only after the wallet-configured, 5-tasks-completed, and no-pending-withdrawal checks above have all passed.
 If you forget your password: go to the Login screen and tap Forgot Password. A 6 digit code is sent to your registered email first. If it cannot be received after a few attempts, an option to instead receive the code via SMS to your registered phone number appears as a fallback — but only after multiple email attempts, and only if a phone number is on file for that account.
 Every verification code expires 5 minutes after it is sent. If it is not used in time, a new code must be requested. A new code can be resent once the on-screen countdown (60 seconds) finishes.
 Before any new email address, phone number, or wallet address is accepted for one of these changes, the system automatically checks whether that value is already linked to a different existing account. If it is already in use elsewhere, the change is rejected immediately with a clear message, and no verification code is sent at all for that specific attempt — the user simply needs to enter a different, unused value and try again.
@@ -215,6 +216,27 @@ function getPktResetBoundaries() {
   const monthLabel = `01 ${monthAbbr} - ${String(lastDateOfMonth).padStart(2, "0")} ${monthAbbr}, ${effectiveYear}`;
 
   return { dayResetUtcMs, monthResetUtcMs, monthLabel };
+}
+
+// Returns the user's effective completed-task count for TODAY, applying
+// the same 4 PM UTC daily reset boundary used everywhere else
+// (TasksScreen, completeTask). A stored taskCount from a previous day
+// (stale lastTaskReset) is treated as 0, so a user can't rely on
+// yesterday's completed-tasks count to pass today's withdrawal check.
+function getEffectiveTaskCount(userData) {
+  const now = new Date();
+  let lastResetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 16, 0, 0));
+  if (now.getTime() < lastResetTime.getTime()) {
+    lastResetTime.setDate(lastResetTime.getDate() - 1);
+  }
+
+  const storedTaskCount = Number(userData.taskCount || 0);
+  const lastTaskReset = userData.lastTaskReset ? userData.lastTaskReset.toDate() : null;
+
+  if (!lastTaskReset || lastTaskReset.getTime() < lastResetTime.getTime()) {
+    return 0;
+  }
+  return storedTaskCount;
 }
 
 // ============================================
@@ -428,12 +450,6 @@ exports.calculateTeamStats = onCall(async (request) => {
 
 // ============================================
 // ADMIN — USER LOOKUP AND MANAGEMENT
-// Lets an admin search for a user by exact username, email, phone
-// number, wallet address, or UID, view their full account detail
-// (balance, team size, current VIP, referrer, etc), and edit their
-// email, phone, wallet address, or balance directly — without needing
-// to open the Firebase Console. Username is never editable here, by
-// design, matching the app's own rule that usernames can never change.
 // ============================================
 
 exports.adminSearchUsers = onCall(async (request) => {
@@ -466,7 +482,6 @@ exports.adminSearchUsers = onCall(async (request) => {
     }
   };
 
-  // Direct UID lookup (exact document ID match)
   try {
     const uidDoc = await db.collection("users").doc(cleanQuery).get();
     addDoc(uidDoc);
@@ -643,17 +658,73 @@ exports.adminUpdateUserData = onCall(async (request) => {
   return { success: true };
 });
 
+// ============================================
+// WITHDRAWAL OTP — validates wallet configured, 5/5 daily tasks
+// completed, and no existing pending withdrawal BEFORE the verification
+// code is even sent. This is the security checkpoint requested: none of
+// these three conditions can be bypassed by a modified client, since the
+// OTP itself is never issued unless all three pass here, server-side.
+// ============================================
+exports.requestWithdrawalOtp = onCall(
+  { secrets: ["BREVO_API_KEY"] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+    const userId = request.auth.uid;
+    const db = admin.firestore();
+
+    const userDoc = await db.collection("users").doc(userId).get();
+    if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+    const userData = userDoc.data();
+
+    // Check 1: wallet address configured
+    if (!userData.walletAddress || !String(userData.walletAddress).trim()) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Please add your withdrawal wallet address before requesting a withdrawal."
+      );
+    }
+
+    // Check 2: today's 5/5 daily tasks completed (server-computed, never
+    // trusting a client-reported count)
+    const effectiveTaskCount = getEffectiveTaskCount(userData);
+    if (effectiveTaskCount < 5) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Please complete all 5 daily tasks before requesting a withdrawal."
+      );
+    }
+
+    // Check 3: no existing pending withdrawal
+    const pendingSnap = await db.collection("withdrawals")
+      .where("userId", "==", userId)
+      .where("status", "==", "pending")
+      .limit(1)
+      .get();
+    if (!pendingSnap.empty) {
+      throw new HttpsError(
+        "failed-precondition",
+        "You already have a pending withdrawal request. Please wait until it is completed before submitting another withdrawal request."
+      );
+    }
+
+    const targetEmail = userData.email;
+    if (!targetEmail) throw new HttpsError("invalid-argument", "No email address is on file for this account.");
+
+    await sendOtpEmailInternal(db, targetEmail, "WITHDRAWAL");
+
+    return { success: true, email: targetEmail };
+  }
+);
+
 exports.requestWithdrawal = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
   const userId = request.auth.uid;
-  const { amount, fee, netPayout, walletAddress } = request.data || {};
+  const { amount, fee, netPayout } = request.data || {};
 
   if (!amount || amount < 15) {
     throw new HttpsError("invalid-argument", "Minimum withdrawal amount is $15.00.");
-  }
-  if (!walletAddress) {
-    throw new HttpsError("invalid-argument", "Wallet address is required.");
   }
 
   const db = admin.firestore();
@@ -675,6 +746,31 @@ exports.requestWithdrawal = onCall(async (request) => {
       if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
 
       const userData = userDoc.data();
+
+      // Re-validate wallet configured and daily tasks completed, since the
+      // OTP verification step could have happened some time before this
+      // final request — a defense-in-depth re-check against the current
+      // account state rather than trusting that the pre-OTP check still
+      // holds. Critically, the wallet address used is ALWAYS the one on
+      // file in Firestore — never a value passed in from the client — so
+      // a modified client cannot redirect a withdrawal to a different,
+      // unverified address.
+      const storedWalletAddress = userData.walletAddress ? String(userData.walletAddress).trim() : "";
+      if (!storedWalletAddress) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Please add your withdrawal wallet address before requesting a withdrawal."
+        );
+      }
+
+      const effectiveTaskCount = getEffectiveTaskCount(userData);
+      if (effectiveTaskCount < 5) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Please complete all 5 daily tasks before requesting a withdrawal."
+        );
+      }
+
       const currentTotalBalance = Number(userData.totalBalance || userData.balance || 0);
 
       const vipLockedCapital = calculateVipLockedCapital(currentTotalBalance);
@@ -699,7 +795,7 @@ exports.requestWithdrawal = onCall(async (request) => {
         amount: Number(amount),
         fee: Number(fee || 0),
         netPayout: Number(netPayout || amount),
-        walletAddress: walletAddress,
+        walletAddress: storedWalletAddress,
         walletNetwork: userData.walletNetwork || "TRC20",
         status: "pending",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1509,12 +1605,73 @@ exports.completeTask = onCall(async (request) => {
 });
 
 // ============================================
-// EMAIL OTP — sent via Brevo's transactional email API.
-// A 45-second server-side cooldown per email prevents anyone from
-// calling this function repeatedly (bypassing the app's own 60-second
-// resend timer) to spam OTP emails and burn through the monthly Brevo
-// send quota.
+// EMAIL OTP — sent via Brevo's transactional email API. The core
+// generation/send logic is shared (sendOtpEmailInternal) so that other
+// functions, like requestWithdrawalOtp, can send the same kind of code
+// after their own precondition checks pass, without duplicating the
+// Brevo integration.
 // ============================================
+
+async function sendOtpEmailInternal(db, targetEmail, purpose) {
+  const otpRef = db.collection("otps").doc(targetEmail);
+  const existingOtpDoc = await otpRef.get();
+  if (existingOtpDoc.exists) {
+    const existingSentAt = existingOtpDoc.data().sentAt || 0;
+    if (Date.now() - existingSentAt < 45000) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "Please wait a moment before requesting another code."
+      );
+    }
+  }
+
+  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 5 * 60 * 1000;
+
+  await otpRef.set({
+    code: otpCode,
+    purpose: purpose,
+    expiresAt: expiresAt,
+    sentAt: Date.now(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) throw new HttpsError("internal", "Email service configuration missing.");
+
+  try {
+    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "api-key": apiKey,
+      },
+      body: JSON.stringify({
+        sender: { name: "TaskEarn", email: "otp@taskearn-app.com" },
+        to: [{ email: targetEmail }],
+        subject: `TaskEarn Verification Code - ${otpCode}`,
+        htmlContent: `<div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+          <h2 style="color: #1E293B;">TaskEarn Verification Code</h2>
+          <p style="color: #475569; font-size: 14px;">Use the code below to complete your request. This code will expire in 5 minutes.</p>
+          <div style="background: #F1F5F9; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #2563EB;">${otpCode}</span>
+          </div>
+          <p style="color: #94A3B8; font-size: 12px;">If you did not request this code, you can safely ignore this email.</p>
+        </div>`,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Brevo send error:", response.status, errText);
+      throw new Error("Failed to send verification email.");
+    }
+  } catch (sendError) {
+    console.error("Error sending OTP via Brevo:", sendError);
+    throw new HttpsError("internal", "Failed to send verification email. Please try again.");
+  }
+}
 
 exports.sendEmailOTP = onCall(
   { secrets: ["BREVO_API_KEY"] },
@@ -1534,64 +1691,7 @@ exports.sendEmailOTP = onCall(
 
     if (!targetEmail) throw new HttpsError("invalid-argument", "Email address is required.");
 
-    const otpRef = db.collection("otps").doc(targetEmail);
-    const existingOtpDoc = await otpRef.get();
-    if (existingOtpDoc.exists) {
-      const existingSentAt = existingOtpDoc.data().sentAt || 0;
-      if (Date.now() - existingSentAt < 45000) {
-        throw new HttpsError(
-          "resource-exhausted",
-          "Please wait a moment before requesting another code."
-        );
-      }
-    }
-
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 5 * 60 * 1000;
-
-    await otpRef.set({
-      code: otpCode,
-      purpose: purpose,
-      expiresAt: expiresAt,
-      sentAt: Date.now(),
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    const apiKey = process.env.BREVO_API_KEY;
-    if (!apiKey) throw new HttpsError("internal", "Email service configuration missing.");
-
-    try {
-      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "api-key": apiKey,
-        },
-        body: JSON.stringify({
-          sender: { name: "TaskEarn", email: "otp@taskearn-app.com" },
-          to: [{ email: targetEmail }],
-          subject: `TaskEarn Verification Code - ${otpCode}`,
-          htmlContent: `<div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
-            <h2 style="color: #1E293B;">TaskEarn Verification Code</h2>
-            <p style="color: #475569; font-size: 14px;">Use the code below to complete your request. This code will expire in 5 minutes.</p>
-            <div style="background: #F1F5F9; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
-              <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #2563EB;">${otpCode}</span>
-            </div>
-            <p style="color: #94A3B8; font-size: 12px;">If you did not request this code, you can safely ignore this email.</p>
-          </div>`,
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error("Brevo send error:", response.status, errText);
-        throw new Error("Failed to send verification email.");
-      }
-    } catch (sendError) {
-      console.error("Error sending OTP via Brevo:", sendError);
-      throw new HttpsError("internal", "Failed to send verification email. Please try again.");
-    }
+    await sendOtpEmailInternal(db, targetEmail, purpose);
 
     return { success: true, email: targetEmail };
   }
