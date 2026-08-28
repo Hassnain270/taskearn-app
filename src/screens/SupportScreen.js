@@ -10,9 +10,10 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
+  Image
 } from 'react-native';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeContext } from '../../ThemeContext';
 import { functions } from '../firebaseConfig';
@@ -80,7 +81,7 @@ export default function LiveSupportScreen({ navigation }) {
       <View style={[styles.messageRow, isUser ? styles.messageRowUser : styles.messageRowAI]}>
         {!isUser && (
           <View style={styles.aiAvatar}>
-            <MaterialCommunityIcons name="robot-happy-outline" size={16} color="#FFFFFF" />
+            <Image source={require('../../assets/icon.png')} style={styles.aiAvatarImage} resizeMode="cover" />
           </View>
         )}
         <View style={[
@@ -105,7 +106,7 @@ export default function LiveSupportScreen({ navigation }) {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.headerIconBox}>
-            <MaterialCommunityIcons name="robot-happy-outline" size={18} color="#FFFFFF" />
+            <Image source={require('../../assets/icon.png')} style={styles.headerLogoImage} resizeMode="cover" />
           </View>
           <View>
             <Text style={currentStyles.headerTitle}>TaskEarn AI Assistant</Text>
@@ -136,7 +137,7 @@ export default function LiveSupportScreen({ navigation }) {
         {sending && (
           <View style={styles.typingRow}>
             <View style={styles.aiAvatar}>
-              <MaterialCommunityIcons name="robot-happy-outline" size={16} color="#FFFFFF" />
+              <Image source={require('../../assets/icon.png')} style={styles.aiAvatarImage} resizeMode="cover" />
             </View>
             <View style={[styles.bubble, currentStyles.bubbleAI, styles.typingBubble]}>
               <ActivityIndicator size="small" color={isDarkMode ? "#94A3B8" : "#64748B"} />
@@ -191,7 +192,8 @@ const darkStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   backBtn: { padding: 4, width: 30 },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'center' },
-  headerIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' },
+  headerIconBox: { width: 32, height: 32, borderRadius: 16, overflow: 'hidden', backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' },
+  headerLogoImage: { width: '100%', height: '100%' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E' },
   statusText: { fontSize: 10, color: '#22C55E', fontWeight: '600' },
@@ -199,7 +201,8 @@ const styles = StyleSheet.create({
   messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   messageRowUser: { justifyContent: 'flex-end' },
   messageRowAI: { justifyContent: 'flex-start' },
-  aiAvatar: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' },
+  aiAvatar: { width: 26, height: 26, borderRadius: 13, overflow: 'hidden', backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' },
+  aiAvatarImage: { width: '100%', height: '100%' },
   bubble: { maxWidth: '75%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleUser: { backgroundColor: '#3B82F6', borderBottomRightRadius: 4 },
   bubbleUserText: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
