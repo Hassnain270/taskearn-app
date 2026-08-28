@@ -11,8 +11,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Image
+  Image,
+  Alert
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeContext } from '../../ThemeContext';
@@ -69,6 +71,28 @@ export default function LiveSupportScreen({ navigation }) {
     }
   };
 
+  // Long-press-to-copy: lets a user copy the assistant's exact answer
+  // (e.g. a detailed explanation of how something works) so they can
+  // paste and share it elsewhere, such as when guiding another user who
+  // asked them the same question.
+  const handleCopyMessage = async (text) => {
+    try {
+      if (Platform.OS === 'web' && navigator.clipboard) {
+        navigator.clipboard.writeText(text);
+      } else {
+        await Clipboard.setStringAsync(text);
+      }
+
+      if (Platform.OS === 'web') {
+        window.alert('Message copied to clipboard.');
+      } else {
+        Alert.alert('Copied', 'Message copied to clipboard.');
+      }
+    } catch (error) {
+      // Copy failures are non-critical — silently ignore.
+    }
+  };
+
   useEffect(() => {
     if (flatListRef.current && messages.length > 0) {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -84,14 +108,19 @@ export default function LiveSupportScreen({ navigation }) {
             <Image source={require('../../assets/icon.png')} style={styles.aiAvatarImage} resizeMode="cover" />
           </View>
         )}
-        <View style={[
-          styles.bubble,
-          isUser ? styles.bubbleUser : currentStyles.bubbleAI
-        ]}>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          delayLongPress={400}
+          onLongPress={() => handleCopyMessage(item.text)}
+          style={[
+            styles.bubble,
+            isUser ? styles.bubbleUser : currentStyles.bubbleAI
+          ]}
+        >
           <Text style={isUser ? styles.bubbleUserText : currentStyles.bubbleAIText}>
             {item.text}
           </Text>
-        </View>
+        </TouchableOpacity>
       </View>
     );
   };
