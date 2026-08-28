@@ -24,13 +24,8 @@ export default function VipScreen({ navigation, route }) {
   const [totalBalance, setTotalBalance] = useState(route?.params?.totalBalance || 0.00);
   const [loading, setLoading] = useState(true);
 
-  // The backend only ever pays an upgrade bonus when a completed task
-  // pushes the balance into a NEW tier beyond this stored value — it
-  // never re-pays for a tier already covered. This screen must use the
-  // SAME baseline to preview bonuses correctly, rather than the user's
-  // live balance-derived tier (which can be higher than what's actually
-  // been bonused, e.g. right after a deposit jumps several tiers at
-  // once, before any task has been completed to trigger payment).
+  // Only used for the informational "pending bonus" notice below — NOT for
+  // calculating each row's bonus amount anymore (see calculateUpgradeBonus).
   const [lastClaimedVipLevel, setLastClaimedVipLevel] = useState(0);
 
   // Defaults to the standard rate while the real value loads from the
@@ -104,16 +99,19 @@ export default function VipScreen({ navigation, route }) {
     { id: 10, name: "VIP 10", minCapital: 20000, capital: "20,000+", profit: "320.0-640.0" },
   ];
 
-  // Matches the backend's exact logic: the baseline is the last tier a
-  // bonus was actually PAID for (lastClaimedVipLevel), not just the
-  // tier the live balance currently qualifies for.
+  // Shows ONLY the single-step bonus for going from the tier immediately
+  // below this one, up to this one — a fixed reference value for that one
+  // step alone. It deliberately does NOT add together any earlier tiers
+  // the user may have already passed through and been paid for; doing
+  // that would show a number bigger than what the backend will actually
+  // pay on this specific step, which is exactly the bug that was fixed
+  // here.
   const calculateUpgradeBonus = (targetItem) => {
     if (targetItem.id <= activeVipId) return 0;
-    if (targetItem.id <= lastClaimedVipLevel) return 0;
 
-    const claimedTier = vipData.find(v => v.id === lastClaimedVipLevel);
-    const claimedCapital = claimedTier ? claimedTier.minCapital : 0;
-    const capitalDiff = targetItem.minCapital - claimedCapital;
+    const prevTier = vipData.find(v => v.id === targetItem.id - 1);
+    const prevCapital = prevTier ? prevTier.minCapital : 0;
+    const capitalDiff = targetItem.minCapital - prevCapital;
 
     return capitalDiff > 0 ? Number((capitalDiff * vipUpgradeRate).toFixed(2)) : 0;
   };
