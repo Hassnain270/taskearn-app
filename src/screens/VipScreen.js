@@ -24,6 +24,15 @@ export default function VipScreen({ navigation, route }) {
   const [totalBalance, setTotalBalance] = useState(route?.params?.totalBalance || 0.00);
   const [loading, setLoading] = useState(true);
 
+  // The backend only ever pays an upgrade bonus when a completed task
+  // pushes the balance into a NEW tier beyond this stored value — it
+  // never re-pays for a tier already covered. This screen must use the
+  // SAME baseline to preview bonuses correctly, rather than the user's
+  // live balance-derived tier (which can be higher than what's actually
+  // been bonused, e.g. right after a deposit jumps several tiers at
+  // once, before any task has been completed to trigger payment).
+  const [lastClaimedVipLevel, setLastClaimedVipLevel] = useState(0);
+
   // Defaults to the standard rate while the real value loads from the
   // central config, so the displayed upgrade bonuses are never wrong for
   // more than a moment.
@@ -37,6 +46,7 @@ export default function VipScreen({ navigation, route }) {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setTotalBalance(Number(data.balance || 0));
+          setLastClaimedVipLevel(Number(data.lastClaimedVipLevel || 0));
         }
         setLoading(false);
       }, () => {
@@ -79,6 +89,7 @@ export default function VipScreen({ navigation, route }) {
   };
 
   const activeVipId = getActiveVipId(totalBalance);
+  const hasPendingBonus = lastClaimedVipLevel < activeVipId;
 
   const vipData = [
     { id: 1, name: "VIP 1", minCapital: 70, capital: "70-149", profit: "1.16-2.40" },
@@ -93,10 +104,17 @@ export default function VipScreen({ navigation, route }) {
     { id: 10, name: "VIP 10", minCapital: 20000, capital: "20,000+", profit: "320.0-640.0" },
   ];
 
+  // Matches the backend's exact logic: the baseline is the last tier a
+  // bonus was actually PAID for (lastClaimedVipLevel), not just the
+  // tier the live balance currently qualifies for.
   const calculateUpgradeBonus = (targetItem) => {
     if (targetItem.id <= activeVipId) return 0;
-    const currentMinCapital = activeVipId > 0 ? (vipData.find(v => v.id === activeVipId)?.minCapital || 0) : 0;
-    const capitalDiff = targetItem.minCapital - currentMinCapital;
+    if (targetItem.id <= lastClaimedVipLevel) return 0;
+
+    const claimedTier = vipData.find(v => v.id === lastClaimedVipLevel);
+    const claimedCapital = claimedTier ? claimedTier.minCapital : 0;
+    const capitalDiff = targetItem.minCapital - claimedCapital;
+
     return capitalDiff > 0 ? Number((capitalDiff * vipUpgradeRate).toFixed(2)) : 0;
   };
 
@@ -146,6 +164,16 @@ export default function VipScreen({ navigation, route }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+
+        {hasPendingBonus && (
+          <View style={currentStyles.pendingBonusBox}>
+            <MaterialCommunityIcons name="gift-outline" size={18} color="#EAB308" />
+            <Text style={currentStyles.pendingBonusText}>
+              You've reached {activeVipName} through your balance. Your upgrade bonus for this level will be credited automatically the next time you complete a daily task.
+            </Text>
+          </View>
+        )}
+
         {vipData.map((item) => {
           let renderStatusButton;
           const isPreviousVip = item.id < activeVipId;
@@ -247,6 +275,8 @@ const lightStyles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1E293B' },
   vipCard: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 14, alignItems: 'center', borderWidth: 1, borderColor: '#F1F5F9', elevation: 1.5 },
   profitValue: { fontSize: 16, fontWeight: 'bold', color: '#1E293B' },
+  pendingBonusBox: { flexDirection: 'row', backgroundColor: '#FFFBEB', borderRadius: 16, padding: 14, marginBottom: 16, alignItems: 'flex-start', gap: 10, borderWidth: 1, borderColor: '#FDE68A' },
+  pendingBonusText: { flex: 1, fontSize: 11, color: '#92400E', fontWeight: '500', lineHeight: 16 },
   bottomTabNav: { backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0' }
 });
 
@@ -256,6 +286,8 @@ const darkStyles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
   vipCard: { flexDirection: 'row', backgroundColor: '#161B22', borderRadius: 20, padding: 16, marginBottom: 14, alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   profitValue: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
+  pendingBonusBox: { flexDirection: 'row', backgroundColor: '#2A1F05', borderRadius: 16, padding: 14, marginBottom: 16, alignItems: 'flex-start', gap: 10, borderWidth: 1, borderColor: '#92400E' },
+  pendingBonusText: { flex: 1, fontSize: 11, color: '#FDE68A', fontWeight: '500', lineHeight: 16 },
   bottomTabNav: { backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D' }
 });
 
