@@ -410,9 +410,17 @@ export default function SecurityScreen({ navigation }) {
     return true;
   };
 
+  // Fixed: navigation now happens FIRST and synchronously, with signOut
+  // fired afterward in the background (not awaited). The previous order
+  // (await signOut, THEN navigate) created a race: signOut's own
+  // asynchronous auth-state change can trigger a re-render elsewhere in
+  // the app at nearly the same moment navigation.reset() tries to run,
+  // and depending on timing, that reset call could silently fail to take
+  // effect — leaving the user stuck on the OTP screen after tapping OK,
+  // even though the password/email change itself had already succeeded.
+  // Navigating immediately removes that race entirely.
   const forceReLogin = (message) => {
-    const goToLogin = async () => {
-      try { await signOut(auth); } catch (e) {}
+    const goToLogin = () => {
       if (navigation?.reset) {
         navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
       } else if (navigation?.replace) {
@@ -420,6 +428,7 @@ export default function SecurityScreen({ navigation }) {
       } else if (navigation?.navigate) {
         navigation.navigate('Login');
       }
+      signOut(auth).catch(() => {});
     };
 
     if (Platform.OS === 'web') {
