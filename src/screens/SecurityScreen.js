@@ -410,32 +410,31 @@ export default function SecurityScreen({ navigation }) {
     return true;
   };
 
-  // Fixed: navigation now happens FIRST and synchronously, with signOut
-  // fired afterward in the background (not awaited). The previous order
-  // (await signOut, THEN navigate) created a race: signOut's own
-  // asynchronous auth-state change can trigger a re-render elsewhere in
-  // the app at nearly the same moment navigation.reset() tries to run,
-  // and depending on timing, that reset call could silently fail to take
-  // effect — leaving the user stuck on the OTP screen after tapping OK,
-  // even though the password/email change itself had already succeeded.
-  // Navigating immediately removes that race entirely.
+  // The previous approach showed a native Alert/window.alert and only
+  // navigated once its "OK" button fired (Alert.alert(..., [{ onPress:
+  // goToLogin }])). That makes navigation depend on the alert's callback
+  // actually firing — and showing a new native alert immediately after
+  // closing the OTP Modal (closeModal() is called right before this) is
+  // unreliable on native platforms: the still-closing Modal and the new
+  // Alert both compete for the same native presentation layer, so the tap
+  // can be swallowed and the callback never runs, leaving the user stuck
+  // on the same screen. The fix: navigate to Login FIRST, unconditionally,
+  // then show the confirmation message. Navigation no longer depends on
+  // the alert being shown or dismissed correctly on any platform.
   const forceReLogin = (message) => {
-    const goToLogin = () => {
-      if (navigation?.reset) {
-        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
-      } else if (navigation?.replace) {
-        navigation.replace('Login');
-      } else if (navigation?.navigate) {
-        navigation.navigate('Login');
-      }
-      signOut(auth).catch(() => {});
-    };
+    if (navigation?.reset) {
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    } else if (navigation?.replace) {
+      navigation.replace('Login');
+    } else if (navigation?.navigate) {
+      navigation.navigate('Login');
+    }
+    signOut(auth).catch(() => {});
 
     if (Platform.OS === 'web') {
       window.alert(message);
-      goToLogin();
     } else {
-      Alert.alert("Security Update Complete", message, [{ text: "OK", onPress: goToLogin }]);
+      Alert.alert("Security Update Complete", message);
     }
   };
 
