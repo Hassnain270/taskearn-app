@@ -17,7 +17,7 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../firebaseConfig';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
 
@@ -53,6 +53,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const [walletNetwork, setWalletNetwork] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [loading, setLoading] = useState(false);
+  const [hasPendingWithdrawal, setHasPendingWithdrawal] = useState(false);
 
   const [otpModalVisible, setOtpModalVisible] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -79,6 +80,21 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
             setWalletNetwork("");
           }
         }
+      });
+      return () => unsubscribe();
+    }
+  }, []);
+
+  useEffect(() => {
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      const pendingQuery = query(
+        collection(db, "withdrawals"),
+        where("userId", "==", currentUser.uid),
+        where("status", "==", "pending")
+      );
+      const unsubscribe = onSnapshot(pendingQuery, (snap) => {
+        setHasPendingWithdrawal(!snap.empty);
       });
       return () => unsubscribe();
     }
@@ -178,14 +194,22 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
       return;
     }
 
+    if (hasPendingWithdrawal) {
+      Alert.alert(
+        "Withdrawal Already Pending",
+        "You already have a pending withdrawal request. Please wait until it is completed before submitting another withdrawal request."
+      );
+      return;
+    }
+
     await sendWithdrawOtp();
   };
 
   const sendWithdrawOtp = async () => {
     setOtpSending(true);
     try {
-      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
-      await sendOtp({ purpose: 'WITHDRAWAL' });
+      const sendOtp = httpsCallable(functionsInstance, 'requestWithdrawalOtp');
+      await sendOtp();
       setOtpCode('');
       setOtpModalVisible(true);
       startOtpTimer();
@@ -200,8 +224,8 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
     if (!canResendOtp) return;
     setOtpSending(true);
     try {
-      const sendOtp = httpsCallable(functionsInstance, 'sendEmailOTP');
-      await sendOtp({ purpose: 'WITHDRAWAL' });
+      const sendOtp = httpsCallable(functionsInstance, 'requestWithdrawalOtp');
+      await sendOtp();
       startOtpTimer();
       Alert.alert("Code Resent", "A new verification code has been sent to your registered email.");
     } catch (err) {
