@@ -49,6 +49,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
 
   const [incomingBalance, setIncomingBalance] = useState(route?.params?.totalBalance || 0.00);
   const [completedTaskCount, setCompletedTaskCount] = useState(route?.params?.taskCount || 0);
+  const [lastTaskReset, setLastTaskReset] = useState(null);
   const [walletAddress, setWalletAddress] = useState("");
   const [walletNetwork, setWalletNetwork] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -72,6 +73,14 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
           const data = docSnap.data();
           if (data.totalBalance !== undefined) setIncomingBalance(data.totalBalance);
           if (data.taskCount !== undefined) setCompletedTaskCount(data.taskCount);
+          if (data.lastTaskReset) {
+            const resetDate = typeof data.lastTaskReset.toDate === 'function'
+              ? data.lastTaskReset.toDate()
+              : new Date(data.lastTaskReset);
+            setLastTaskReset(resetDate);
+          } else {
+            setLastTaskReset(null);
+          }
           if (data.walletAddress) {
             setWalletAddress(data.walletAddress);
             setWalletNetwork(data.walletNetwork || "TRC20");
@@ -124,6 +133,24 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
     if (otpIntervalRef.current) clearInterval(otpIntervalRef.current);
   };
 
+  const getCurrentDayBoundary = () => {
+    const now = new Date();
+    let boundary = new Date();
+    boundary.setUTCHours(16, 0, 0, 0);
+    if (now.getTime() < boundary.getTime()) {
+      boundary.setUTCDate(boundary.getUTCDate() - 1);
+    }
+    return boundary;
+  };
+
+  const isStoredCountStale = () => {
+    if (!lastTaskReset) return true;
+    const boundary = getCurrentDayBoundary();
+    return lastTaskReset.getTime() < boundary.getTime();
+  };
+
+  const effectiveTaskCount = isStoredCountStale() ? 0 : completedTaskCount;
+
   const vipLockedCapital = calculateVipLockedCapital(incomingBalance);
   const withdrawableBalance = incomingBalance > vipLockedCapital ? parseFloat((incomingBalance - vipLockedCapital).toFixed(2)) : 0.00;
 
@@ -134,7 +161,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const operationalFee = parsedAmount > 0 ? Number((parsedAmount * 0.07).toFixed(2)) : 0;
   const netPayoutPreview = parsedAmount > 0 ? Number((parsedAmount - operationalFee).toFixed(2)) : 0;
 
-  const isTaskCompleted = completedTaskCount >= 5;
+  const isTaskCompleted = effectiveTaskCount >= 5;
   const isValidAmount = parsedAmount >= 15 && parsedAmount <= withdrawableBalance;
   const isButtonEnabled = hasWallet && isTaskCompleted && isValidAmount && !loading;
 
@@ -349,7 +376,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
               <Text style={styles.errorText}>Requested amount exceeds available withdrawable profit limits.</Text>
             )}
             {!isTaskCompleted && (
-              <Text style={styles.errorText}>You must complete 5 tasks before withdrawing (Current: {completedTaskCount}/5).</Text>
+              <Text style={styles.errorText}>You must complete 5 tasks before withdrawing (Current: {effectiveTaskCount}/5).</Text>
             )}
           </View>
 
