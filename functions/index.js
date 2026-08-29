@@ -1995,3 +1995,30 @@ exports.chatWithSupportAI = onCall(
     }
   }
 );
+
+// ============================================
+// LOGGED-IN PASSWORD CHANGE (Security screen)
+// ============================================
+// Uses the Admin SDK instead of the client SDK's updatePassword(), which
+// requires a "recent" Firebase sign-in. Our email-OTP verification proves
+// identity independently of Firebase's own session freshness, so this
+// avoids the client SDK throwing "auth/requires-recent-login" for users
+// who signed in more than a few minutes ago (i.e. almost always).
+exports.changeAccountPassword = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "User must be logged in.");
+  }
+
+  const { newPassword } = request.data || {};
+  if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+    throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
+  }
+
+  try {
+    await admin.auth().updateUser(request.auth.uid, { password: newPassword });
+    return { success: true };
+  } catch (error) {
+    console.error("Error changing account password:", error);
+    throw new HttpsError("internal", "Failed to update password. Please try again.");
+  }
+});

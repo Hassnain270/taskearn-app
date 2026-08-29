@@ -19,7 +19,6 @@ import { Feather } from '@expo/vector-icons';
 import { RecaptchaVerifier } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
 import {
-  updatePassword,
   verifyBeforeUpdateEmail,
   signOut,
   linkWithCredential,
@@ -602,7 +601,8 @@ export default function SecurityScreen({ navigation }) {
         const verifyOtp = httpsCallable(functionsInstance, 'verifyEmailOTP');
         await verifyOtp({ email: user.email, code: otpCode, purpose: 'PASSWORD_CHANGE' });
 
-        await updatePassword(user, newPassword);
+        const changePassword = httpsCallable(functionsInstance, 'changeAccountPassword');
+        await changePassword({ newPassword });
         closeModal();
         forceReLogin("Your password has been changed successfully. For your security, please log in again with your new password.");
       } else if (activeLayer === 'phone') {
