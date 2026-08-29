@@ -29,17 +29,24 @@ export default function PhoneVerifyBridge({ visible, purpose, phone, newEmail, n
       setLoading(true);
       setError('');
       try {
-        const issueToken = httpsCallable(functionsInstance, 'issueWebViewSessionToken');
-        const res = await issueToken();
-        const token = res.data.token;
-
         const params = new URLSearchParams();
         params.set('purpose', purpose);
-        params.set('token', token);
         if (phone) params.set('phone', phone);
         if (newEmail) params.set('newEmail', newEmail);
         if (newPhone) params.set('newPhone', newPhone);
         if (dialCode) params.set('dialCode', dialCode);
+
+        // Only an already-logged-in flow (e.g. verifying phone to change
+        // email from Security settings) needs a session token — issuing
+        // one requires an authenticated caller. A forgot-password user
+        // has no session yet (that's the whole reason they're here), so
+        // skip this step for that purpose and let the page send the SMS
+        // OTP directly, exactly like the web version already does.
+        if (purpose !== 'forgot_password') {
+          const issueToken = httpsCallable(functionsInstance, 'issueWebViewSessionToken');
+          const res = await issueToken();
+          params.set('token', res.data.token);
+        }
 
         setUrl(`${PHONE_VERIFY_BASE_URL}?${params.toString()}`);
         setLoading(false);

@@ -4,6 +4,7 @@ import {
   RecaptchaVerifier,
   PhoneAuthProvider,
   signInWithCustomToken,
+  signInWithCredential,
   linkWithCredential,
   reauthenticateWithCredential,
   verifyBeforeUpdateEmail
@@ -54,6 +55,14 @@ export default function PhoneVerifyScreen({ route }) {
   useEffect(() => {
     const init = async () => {
       try {
+        if (purpose === 'forgot_password') {
+          // No prior session exists for this flow — the user is here
+          // precisely because they can't log in. Sending the SMS OTP
+          // itself does not require an authenticated session, so skip
+          // straight to sending it.
+          setStatus('ready');
+          return;
+        }
         if (!token) {
           setStatus('error');
           setErrorMsg('Missing session token. Please go back and try again.');
@@ -67,7 +76,7 @@ export default function PhoneVerifyScreen({ route }) {
       }
     };
     init();
-  }, [token]);
+  }, [token, purpose]);
 
   useEffect(() => {
     if (status === 'ready') {
@@ -128,7 +137,11 @@ export default function PhoneVerifyScreen({ route }) {
       const credential = PhoneAuthProvider.credential(verificationId, otpCode);
 
       if (purpose === 'forgot_password') {
-        await verifyAndBindPhoneCredential(credential);
+        // Sign in directly with the freshly-verified phone credential —
+        // this authenticates as whichever existing account that phone
+        // number is already linked to, without needing a prior session.
+        // This mirrors exactly what the web version of this flow does.
+        await signInWithCredential(auth, credential);
         const issueToken = httpsCallable(functionsInstance, 'issuePasswordResetTokenForPhone');
         const res = await issueToken();
         setStatus('done');
