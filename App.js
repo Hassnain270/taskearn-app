@@ -30,6 +30,7 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import SupportScreen from './src/screens/SupportScreen';
 import SecurityScreen from './src/screens/SecurityScreen';
 import DepositScreen from './src/screens/DepositScreen';
+import AdminPanelScreen from './src/screens/AdminPanelScreen';
 import AdminWithdrawalsScreen from './src/screens/AdminWithdrawalsScreen';
 import AdminBonusConfigScreen from './src/screens/AdminBonusConfigScreen';
 import AdminUserManagementScreen from './src/screens/AdminUserManagementScreen';
@@ -243,6 +244,7 @@ export default function App() {
               <Stack.Screen name="Support" component={SupportScreen} />
               <Stack.Screen name="SecurityScreen" component={SecurityScreen} />
               <Stack.Screen name="Deposit" component={DepositScreen} />
+              <Stack.Screen name="AdminPanelScreen" component={AdminPanelScreen} />
               <Stack.Screen name="AdminWithdrawalsScreen" component={AdminWithdrawalsScreen} />
               <Stack.Screen name="AdminBonusConfigScreen" component={AdminBonusConfigScreen} />
               <Stack.Screen name="AdminUserManagementScreen" component={AdminUserManagementScreen} />

@@ -126,7 +126,7 @@ ACCOUNT UNIQUENESS AND USERNAME RULES:
 Each email address, phone number, and cryptocurrency wallet address can only ever be linked to exactly one TaskEarn account at a time, both during registration and for any later change made from the Security or Wallet Configuration screens.
 A username is chosen once, during registration, and can never be changed afterward under any circumstance — there is no option anywhere in the app to change an existing username later. During registration itself, the chosen username is also checked against all existing accounts, and if it is already taken, the user is asked to choose a different one before they can continue.
 
-TRANSACTION HISTORY: Home -> History. Shows Deposits, Withdrawals, Welcome Bonus, Direct Referral Bonus, Indirect Referral Bonus, VIP Upgrade Bonus, and Task Commission.
+TRANSACTION HISTORY: Home -> History. Shows Deposits, Withdrawals, Welcome Bonus, Direct Referral Bonus, Indirect Referral Bonus, VIP Upgrade Bonus, Task Commission, and any manual balance adjustment made by an administrator, which always includes a stated reason.
 
 TEAM AND REFERRALS: TEAM tab shows the user's own team size, joinings, and their own direct members (their downline) — it does not show who referred the user themselves. Get your referral link: Home -> Invitation, which displays only the user's own referral code and link for sharing with others.
 Direct and indirect referral bonuses are ONE-TIME bonuses, not an ongoing share of a referred member's income. When a Level 1 (direct) referred member makes a deposit that activates a VIP capital tier, their referrer receives a one-time bonus equal to ${directPct} percent of that VIP capital amount. If that direct member was themselves referred by someone else, that second-level (indirect) referrer also receives a one-time bonus of ${indirectPct} percent of the same VIP capital amount, at that same moment. Both bonuses are paid once, at the moment of that specific deposit-triggered VIP activation — they are never a recurring percentage of the referred member's daily task earnings or any of their future income, and they have no ongoing connection to how much that member goes on to earn afterward.
@@ -202,6 +202,21 @@ function getVipTierByBalance(balance) {
   return null;
 }
 
+// Parses any of the timestamp shapes seen across this codebase
+// (Firestore Timestamp, epoch millis, ISO string) into epoch millis.
+function getMemberTimestamp(createdAt) {
+  if (!createdAt) return 0;
+  if (typeof createdAt.toDate === "function") return createdAt.toDate().getTime();
+  if (typeof createdAt === "number") return createdAt;
+  if (typeof createdAt === "string") return new Date(createdAt).getTime() || 0;
+  if (createdAt.seconds) return createdAt.seconds * 1000;
+  return 0;
+}
+
+// Computes the day/week/month boundaries (PKT, 9 PM daily reset, matching
+// every other reset boundary in this file), plus human-readable date
+// range labels for the week and month, used for the admin's joining
+// breakdown.
 function getPktResetBoundaries() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -220,6 +235,12 @@ function getPktResetBoundaries() {
   ));
   const dayResetUtcMs = dayResetPkt.getTime() - 5 * 3600000 - now.getTimezoneOffset() * 60000;
 
+  // A rolling 7-day window ending on the current day (inclusive), rather
+  // than a fixed Mon-Sun week — simplest to reason about and to label.
+  const weekResetPkt = new Date(dayResetPkt);
+  weekResetPkt.setUTCDate(weekResetPkt.getUTCDate() - 6);
+  const weekResetUtcMs = weekResetPkt.getTime() - 5 * 3600000 - now.getTimezoneOffset() * 60000;
+
   const monthResetPkt = new Date(Date.UTC(
     effectivePkt.getUTCFullYear(),
     effectivePkt.getUTCMonth(),
@@ -234,7 +255,11 @@ function getPktResetBoundaries() {
   const monthAbbr = MONTH_ABBR[effectiveMonth];
   const monthLabel = `01 ${monthAbbr} - ${String(lastDateOfMonth).padStart(2, "0")} ${monthAbbr}, ${effectiveYear}`;
 
-  return { dayResetUtcMs, monthResetUtcMs, monthLabel };
+  const weekStartLabel = `${String(weekResetPkt.getUTCDate()).padStart(2, "0")} ${MONTH_ABBR[weekResetPkt.getUTCMonth()]}`;
+  const weekEndLabel = `${String(effectivePkt.getUTCDate()).padStart(2, "0")} ${monthAbbr}, ${effectiveYear}`;
+  const weekLabel = `${weekStartLabel} - ${weekEndLabel}`;
+
+  return { dayResetUtcMs, weekResetUtcMs, weekLabel, monthResetUtcMs, monthLabel };
 }
 
 // Returns the user's effective completed-task count for TODAY, applying
@@ -400,15 +425,6 @@ exports.calculateTeamStats = onCall(async (request) => {
     const usersSnapshot = await db.collection("users").get();
     const allUsers = usersSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
-    const getMemberTimestamp = (createdAt) => {
-      if (!createdAt) return 0;
-      if (typeof createdAt.toDate === "function") return createdAt.toDate().getTime();
-      if (typeof createdAt === "number") return createdAt;
-      if (typeof createdAt === "string") return new Date(createdAt).getTime() || 0;
-      if (createdAt.seconds) return createdAt.seconds * 1000;
-      return 0;
-    };
-
     const { dayResetUtcMs, monthResetUtcMs, monthLabel } = getPktResetBoundaries();
 
     let globalTodayCount = 0;
@@ -549,7 +565,8 @@ exports.adminGetUserDetail = onCall(async (request) => {
   const usersSnapshot = await db.collection("users").get();
   const allUsers = usersSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  const directTeamCount = allUsers.filter((u) => u.referredByUid === uid).length;
+  const directMembers = allUsers.filter((u) => u.referredByUid === uid);
+  const directTeamCount = directMembers.length;
 
   const countSubTree = (parentUid) => {
     const children = allUsers.filter((u) => u.referredByUid === parentUid);
@@ -560,6 +577,22 @@ exports.adminGetUserDetail = onCall(async (request) => {
     return count;
   };
   const totalTeamSize = countSubTree(uid);
+  const indirectTeamSize = totalTeamSize - directTeamCount;
+
+  // Joining breakdown — only DIRECT members are counted here (matching
+  // what the admin can attribute specifically to this user's own
+  // recruiting activity), broken down by when each one registered.
+  const { dayResetUtcMs, weekResetUtcMs, weekLabel, monthResetUtcMs, monthLabel } = getPktResetBoundaries();
+
+  let todayJoinings = 0;
+  let weekJoinings = 0;
+  let monthJoinings = 0;
+  directMembers.forEach((m) => {
+    const t = getMemberTimestamp(m.createdAt);
+    if (t >= dayResetUtcMs) todayJoinings++;
+    if (t >= weekResetUtcMs) weekJoinings++;
+    if (t >= monthResetUtcMs) monthJoinings++;
+  });
 
   const currentBalance = Number(userData.totalBalance || userData.balance || 0);
   const activeTier = getVipTierByBalance(currentBalance);
@@ -586,7 +619,13 @@ exports.adminGetUserDetail = onCall(async (request) => {
       teamReward: Number(userData.teamReward || 0),
       currentVip: activeTier ? activeTier.name : "No VIP",
       directTeamCount,
+      indirectTeamSize,
       totalTeamSize,
+      todayJoinings,
+      weekJoinings,
+      weekLabel,
+      monthJoinings,
+      monthLabel,
       referrerUsername,
       isAdmin: userData.isAdmin === true,
       createdAt: toMillis(userData.createdAt),
@@ -602,13 +641,15 @@ exports.adminUpdateUserData = onCall(async (request) => {
   if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
     throw new HttpsError("permission-denied", "Only administrators may edit user accounts.");
   }
+  const adminUsername = adminDoc.data().username || "an administrator";
 
-  const { uid, email, phoneNumber, walletAddress, balance } = request.data || {};
+  const { uid, email, phoneNumber, walletAddress, balance, balanceReason } = request.data || {};
   if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
 
   const userRef = db.collection("users").doc(uid);
   const userDoc = await userRef.get();
   if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+  const currentUserData = userDoc.data();
 
   const updates = {};
 
@@ -659,8 +700,21 @@ exports.adminUpdateUserData = onCall(async (request) => {
     updates.walletAddressUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
   }
 
+  let balanceDiff = 0;
+  const cleanBalanceReason = (balanceReason || "").trim();
+
   if (typeof balance === "number" && !isNaN(balance) && balance >= 0) {
+    const oldBalance = Number(currentUserData.totalBalance || currentUserData.balance || 0);
     const roundedBalance = Number(balance.toFixed(2));
+    balanceDiff = Number((roundedBalance - oldBalance).toFixed(2));
+
+    if (balanceDiff !== 0 && !cleanBalanceReason) {
+      throw new HttpsError(
+        "invalid-argument",
+        "A reason is required when changing a user's balance, so it can be recorded in their transaction history."
+      );
+    }
+
     updates.balance = roundedBalance;
     updates.totalBalance = roundedBalance;
   }
@@ -673,6 +727,27 @@ exports.adminUpdateUserData = onCall(async (request) => {
   updates.lastAdminEditAt = admin.firestore.FieldValue.serverTimestamp();
 
   await userRef.update(updates);
+
+  // Record the balance adjustment in the user's own transaction history,
+  // with the admin's stated reason, so the user can see exactly why their
+  // balance changed (e.g. a bonus that was credited in error being
+  // corrected) rather than just seeing an unexplained number change.
+  if (balanceDiff !== 0) {
+    const isCredit = balanceDiff > 0;
+    const adjTxRef = db.collection("transactions").doc();
+    await adjTxRef.set({
+      transactionId: adjTxRef.id,
+      userId: uid,
+      type: "ADMIN_BALANCE_ADJUSTMENT",
+      amount: Math.abs(balanceDiff),
+      status: "approved",
+      isCredit: isCredit,
+      title: `${isCredit ? "Balance Correction (Added)" : "Balance Correction (Deducted)"}: ${cleanBalanceReason}`,
+      reason: cleanBalanceReason,
+      adjustedBy: request.auth.uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
 
   return { success: true };
 });
@@ -1610,11 +1685,7 @@ exports.completeTask = onCall(async (request) => {
 });
 
 // ============================================
-// EMAIL OTP — sent via Brevo's transactional email API. The core
-// generation/send logic is shared (sendOtpEmailInternal) so that other
-// functions, like requestWithdrawalOtp, can send the same kind of code
-// after their own precondition checks pass, without duplicating the
-// Brevo integration.
+// EMAIL OTP — sent via Brevo's transactional email API.
 // ============================================
 
 async function sendOtpEmailInternal(db, targetEmail, purpose) {
@@ -2004,11 +2075,6 @@ exports.chatWithSupportAI = onCall(
 // ============================================
 // LOGGED-IN PASSWORD CHANGE (Security screen)
 // ============================================
-// Uses the Admin SDK instead of the client SDK's updatePassword(), which
-// requires a "recent" Firebase sign-in. Our email-OTP verification proves
-// identity independently of Firebase's own session freshness, so this
-// avoids the client SDK throwing "auth/requires-recent-login" for users
-// who signed in more than a few minutes ago (i.e. almost always).
 exports.changeAccountPassword = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in.");

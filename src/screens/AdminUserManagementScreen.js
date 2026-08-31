@@ -59,6 +59,7 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [editPhone, setEditPhone] = useState('');
   const [editWallet, setEditWallet] = useState('');
   const [editBalance, setEditBalance] = useState('');
+  const [balanceReason, setBalanceReason] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -105,6 +106,7 @@ export default function AdminUserManagementScreen({ navigation }) {
     setDetailModalVisible(true);
     setDetailLoading(true);
     setSelectedDetail(null);
+    setBalanceReason('');
     try {
       const detailFn = httpsCallable(functions, 'adminGetUserDetail');
       const res = await detailFn({ uid });
@@ -125,6 +127,7 @@ export default function AdminUserManagementScreen({ navigation }) {
   const closeDetailModal = () => {
     setDetailModalVisible(false);
     setSelectedDetail(null);
+    setBalanceReason('');
   };
 
   const handleSaveChanges = async () => {
@@ -152,9 +155,16 @@ export default function AdminUserManagementScreen({ navigation }) {
     }
 
     const numericBalance = parseFloat(editBalance);
-    if (!isNaN(numericBalance) && numericBalance !== selectedDetail.balance) {
+    const balanceChanged = !isNaN(numericBalance) && numericBalance !== selectedDetail.balance;
+    if (balanceChanged) {
       updates.balance = numericBalance;
       hasChanges = true;
+
+      if (!balanceReason.trim()) {
+        showAlert('Reason Required', 'Please enter a reason for changing this balance — it will be recorded in the user\'s transaction history.');
+        return;
+      }
+      updates.balanceReason = balanceReason.trim();
     }
 
     if (!hasChanges) {
@@ -197,6 +207,9 @@ export default function AdminUserManagementScreen({ navigation }) {
       </View>
     </TouchableOpacity>
   );
+
+  const numericEditBalance = parseFloat(editBalance);
+  const showReasonField = selectedDetail && !isNaN(numericEditBalance) && numericEditBalance !== selectedDetail.balance;
 
   if (accessChecked && !isAdmin) {
     return (
@@ -305,14 +318,6 @@ export default function AdminUserManagementScreen({ navigation }) {
                       <Text style={currentStyles.infoValue}>{selectedDetail.currentVip}</Text>
                     </View>
                     <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Direct Team</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.directTeamCount}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Total Team Size</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.totalTeamSize}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
                       <Text style={styles.infoLabel}>Referred By</Text>
                       <Text style={currentStyles.infoValue}>{selectedDetail.referrerUsername || 'None'}</Text>
                     </View>
@@ -332,6 +337,36 @@ export default function AdminUserManagementScreen({ navigation }) {
                       <Text style={styles.infoLabel}>Wallet Last Updated</Text>
                       <Text style={currentStyles.infoValue}>{formatDate(selectedDetail.walletAddressUpdatedAt)}</Text>
                     </View>
+                  </View>
+
+                  <Text style={currentStyles.sectionLabel}>TEAM AND JOININGS</Text>
+                  <View style={currentStyles.infoBox}>
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Direct Team</Text>
+                      <Text style={currentStyles.infoValue}>{selectedDetail.directTeamCount}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Indirect Team</Text>
+                      <Text style={currentStyles.infoValue}>{selectedDetail.indirectTeamSize}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Total Team Size</Text>
+                      <Text style={currentStyles.infoValue}>{selectedDetail.totalTeamSize}</Text>
+                    </View>
+                    <View style={currentStyles.teamDivider} />
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Today's Joinings</Text>
+                      <Text style={currentStyles.infoValue}>{selectedDetail.todayJoinings}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>This Week ({selectedDetail.weekLabel})</Text>
+                      <Text style={currentStyles.infoValue}>{selectedDetail.weekJoinings}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>This Month ({selectedDetail.monthLabel})</Text>
+                      <Text style={currentStyles.infoValue}>{selectedDetail.monthJoinings}</Text>
+                    </View>
+                    <Text style={styles.joiningNote}>These joining counts reflect only this user's direct referrals.</Text>
                   </View>
 
                   <Text style={currentStyles.sectionLabel}>EDITABLE FIELDS</Text>
@@ -376,6 +411,22 @@ export default function AdminUserManagementScreen({ navigation }) {
                     placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
                   />
 
+                  {showReasonField && (
+                    <>
+                      <Text style={[styles.fieldLabel, { color: '#F59E0B' }]}>
+                        Reason for Balance Change (required — will appear in the user's transaction history)
+                      </Text>
+                      <TextInput
+                        style={[currentStyles.editInput, { borderColor: '#F59E0B' }]}
+                        value={balanceReason}
+                        onChangeText={setBalanceReason}
+                        placeholder="e.g. Correcting a duplicate bonus credited in error"
+                        placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                        multiline
+                      />
+                    </>
+                  )}
+
                   <Text style={styles.usernameNote}>Username cannot be changed, matching the app's own permanent-username rule.</Text>
 
                   <TouchableOpacity style={styles.saveBtn} onPress={handleSaveChanges} disabled={saving}>
@@ -406,7 +457,8 @@ const lightStyles = StyleSheet.create({
   infoBox: { backgroundColor: '#F8FAFC', borderRadius: 14, padding: 14, marginTop: 12, marginBottom: 16, gap: 8 },
   infoValue: { fontSize: 12, fontWeight: '700', color: '#334155', maxWidth: '60%', textAlign: 'right' },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 10 },
-  editInput: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, color: '#1E293B', fontSize: 13, marginBottom: 14 }
+  editInput: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, color: '#1E293B', fontSize: 13, marginBottom: 14 },
+  teamDivider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 4 }
 });
 
 const darkStyles = StyleSheet.create({
@@ -423,7 +475,8 @@ const darkStyles = StyleSheet.create({
   infoBox: { backgroundColor: '#0D1117', borderRadius: 14, padding: 14, marginTop: 12, marginBottom: 16, gap: 8 },
   infoValue: { fontSize: 12, fontWeight: '700', color: '#E2E8F0', maxWidth: '60%', textAlign: 'right' },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 10 },
-  editInput: { backgroundColor: '#0D1117', borderRadius: 10, borderWidth: 1, borderColor: '#21262D', padding: 12, color: '#FFFFFF', fontSize: 13, marginBottom: 14 }
+  editInput: { backgroundColor: '#0D1117', borderRadius: 10, borderWidth: 1, borderColor: '#21262D', padding: 12, color: '#FFFFFF', fontSize: 13, marginBottom: 14 },
+  teamDivider: { height: 1, backgroundColor: '#21262D', marginVertical: 4 }
 });
 
 const styles = StyleSheet.create({
@@ -446,6 +499,7 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: 11, fontWeight: '600', color: '#94A3B8' },
   fieldLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', marginBottom: 6 },
   usernameNote: { fontSize: 10, color: '#94A3B8', fontWeight: '500', marginBottom: 16, fontStyle: 'italic' },
+  joiningNote: { fontSize: 10, color: '#94A3B8', fontWeight: '500', fontStyle: 'italic', marginTop: 6 },
   saveBtn: { backgroundColor: '#3B82F6', height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   saveBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   accessDeniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 40 },

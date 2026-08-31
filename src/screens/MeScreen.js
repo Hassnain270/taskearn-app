@@ -244,50 +244,14 @@ export default function MeScreen({ navigation }) {
               <TouchableOpacity
                 style={currentStyles.optionItem}
                 activeOpacity={0.7}
-                onPress={() => safeNavigate('AdminWithdrawalsScreen')}
+                onPress={() => safeNavigate('AdminPanelScreen')}
               >
                 <View style={styles.optionLeft}>
                   <View style={[currentStyles.iconWrapper, { backgroundColor: isDarkMode ? '#1E293B' : '#EFF6FF' }]}>
-                    <Feather name="check-square" size={16} color="#2563EB" />
+                    <Feather name="shield" size={16} color="#2563EB" />
                   </View>
                   <Text style={[currentStyles.optionTitle, { color: '#2563EB', fontWeight: '700' }]}>
-                    Withdrawal Approvals
-                  </Text>
-                </View>
-                <Feather name="chevron-right" size={16} color="#2563EB" />
-              </TouchableOpacity>
-
-              <View style={currentStyles.divider} />
-
-              <TouchableOpacity
-                style={currentStyles.optionItem}
-                activeOpacity={0.7}
-                onPress={() => safeNavigate('AdminBonusConfigScreen')}
-              >
-                <View style={styles.optionLeft}>
-                  <View style={[currentStyles.iconWrapper, { backgroundColor: isDarkMode ? '#1E293B' : '#EFF6FF' }]}>
-                    <Feather name="percent" size={16} color="#2563EB" />
-                  </View>
-                  <Text style={[currentStyles.optionTitle, { color: '#2563EB', fontWeight: '700' }]}>
-                    Bonus Settings
-                  </Text>
-                </View>
-                <Feather name="chevron-right" size={16} color="#2563EB" />
-              </TouchableOpacity>
-
-              <View style={currentStyles.divider} />
-
-              <TouchableOpacity
-                style={currentStyles.optionItem}
-                activeOpacity={0.7}
-                onPress={() => safeNavigate('AdminUserManagementScreen')}
-              >
-                <View style={styles.optionLeft}>
-                  <View style={[currentStyles.iconWrapper, { backgroundColor: isDarkMode ? '#1E293B' : '#EFF6FF' }]}>
-                    <Feather name="users" size={16} color="#2563EB" />
-                  </View>
-                  <Text style={[currentStyles.optionTitle, { color: '#2563EB', fontWeight: '700' }]}>
-                    User Management
+                    Admin Panel
                   </Text>
                 </View>
                 <Feather name="chevron-right" size={16} color="#2563EB" />
