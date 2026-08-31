@@ -191,6 +191,11 @@ export default function AdminUserManagementScreen({ navigation }) {
     return new Date(millis).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  const formatDateOnly = (millis) => {
+    if (!millis) return 'Not recorded';
+    return new Date(millis).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
   const renderResultItem = ({ item }) => (
     <TouchableOpacity style={currentStyles.resultCard} onPress={() => openUserDetail(item.uid)}>
       <View style={styles.resultAvatarCircle}>
@@ -314,6 +319,10 @@ export default function AdminUserManagementScreen({ navigation }) {
                       <Text style={currentStyles.infoValue} numberOfLines={1}>{selectedDetail.uid}</Text>
                     </View>
                     <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Registered On</Text>
+                      <Text style={currentStyles.infoValue}>{formatDateOnly(selectedDetail.registeredAt)}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
                       <Text style={styles.infoLabel}>Current VIP</Text>
                       <Text style={currentStyles.infoValue}>{selectedDetail.currentVip}</Text>
                     </View>
@@ -337,6 +346,23 @@ export default function AdminUserManagementScreen({ navigation }) {
                       <Text style={styles.infoLabel}>Wallet Last Updated</Text>
                       <Text style={currentStyles.infoValue}>{formatDate(selectedDetail.walletAddressUpdatedAt)}</Text>
                     </View>
+                  </View>
+
+                  <Text style={currentStyles.sectionLabel}>DEPOSIT HISTORY (VERIFICATION)</Text>
+                  <View style={currentStyles.infoBox}>
+                    {selectedDetail.deposits && selectedDetail.deposits.length > 0 ? (
+                      selectedDetail.deposits.map((dep, idx) => (
+                        <React.Fragment key={idx}>
+                          <View style={styles.infoRow}>
+                            <Text style={styles.infoLabel}>{formatDate(dep.date)}</Text>
+                            <Text style={[currentStyles.infoValue, { color: '#10B981' }]}>+${dep.amount.toFixed(2)}</Text>
+                          </View>
+                          {idx < selectedDetail.deposits.length - 1 && <View style={currentStyles.teamDivider} />}
+                        </React.Fragment>
+                      ))
+                    ) : (
+                      <Text style={styles.joiningNote}>No deposits made yet.</Text>
+                    )}
                   </View>
 
                   <Text style={currentStyles.sectionLabel}>TEAM AND JOININGS</Text>

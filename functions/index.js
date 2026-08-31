@@ -594,14 +594,31 @@ exports.adminGetUserDetail = onCall(async (request) => {
     if (t >= monthResetUtcMs) monthJoinings++;
   });
 
-  const currentBalance = Number(userData.totalBalance || userData.balance || 0);
-  const activeTier = getVipTierByBalance(currentBalance);
+  // Deposit history — every confirmed deposit this user has made, newest
+  // first, so an admin can ask the user "what date and amount was your
+  // deposit?" as a verification question and cross-check the answer
+  // against real records (useful if someone claims to be a user whose
+  // account they don't actually own).
+  const depositTxSnap = await db.collection("transactions")
+    .where("userId", "==", uid)
+    .where("type", "==", "DEPOSIT")
+    .get();
 
   const toMillis = (ts) => {
     if (!ts) return null;
     if (typeof ts.toMillis === "function") return ts.toMillis();
     return null;
   };
+
+  const deposits = depositTxSnap.docs
+    .map((d) => ({
+      amount: Number(d.data().amount || 0),
+      date: toMillis(d.data().createdAt),
+    }))
+    .sort((a, b) => (b.date || 0) - (a.date || 0));
+
+  const currentBalance = Number(userData.totalBalance || userData.balance || 0);
+  const activeTier = getVipTierByBalance(currentBalance);
 
   return {
     success: true,
@@ -613,6 +630,8 @@ exports.adminGetUserDetail = onCall(async (request) => {
       walletAddress: userData.walletAddress || null,
       walletNetwork: userData.walletNetwork || null,
       walletAddressUpdatedAt: toMillis(userData.walletAddressUpdatedAt),
+      registeredAt: toMillis(userData.createdAt),
+      deposits,
       balance: currentBalance,
       totalEarnings: Number(userData.totalEarnings || 0),
       totalWithdraw: Number(userData.totalWithdraw || 0),
@@ -628,7 +647,6 @@ exports.adminGetUserDetail = onCall(async (request) => {
       monthLabel,
       referrerUsername,
       isAdmin: userData.isAdmin === true,
-      createdAt: toMillis(userData.createdAt),
     },
   };
 });
@@ -641,7 +659,6 @@ exports.adminUpdateUserData = onCall(async (request) => {
   if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
     throw new HttpsError("permission-denied", "Only administrators may edit user accounts.");
   }
-  const adminUsername = adminDoc.data().username || "an administrator";
 
   const { uid, email, phoneNumber, walletAddress, balance, balanceReason } = request.data || {};
   if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
@@ -728,10 +745,6 @@ exports.adminUpdateUserData = onCall(async (request) => {
 
   await userRef.update(updates);
 
-  // Record the balance adjustment in the user's own transaction history,
-  // with the admin's stated reason, so the user can see exactly why their
-  // balance changed (e.g. a bonus that was credited in error being
-  // corrected) rather than just seeing an unexplained number change.
   if (balanceDiff !== 0) {
     const isCredit = balanceDiff > 0;
     const adjTxRef = db.collection("transactions").doc();
