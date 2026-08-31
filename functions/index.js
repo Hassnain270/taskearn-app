@@ -204,6 +204,9 @@ function getVipTierByBalance(balance) {
 
 // Parses any of the timestamp shapes seen across this codebase
 // (Firestore Timestamp, epoch millis, ISO string) into epoch millis.
+// Used everywhere a stored createdAt-style field needs to be read, since
+// different parts of the app have historically written this field in
+// slightly different shapes.
 function getMemberTimestamp(createdAt) {
   if (!createdAt) return 0;
   if (typeof createdAt.toDate === "function") return createdAt.toDate().getTime();
@@ -620,6 +623,15 @@ exports.adminGetUserDetail = onCall(async (request) => {
   const currentBalance = Number(userData.totalBalance || userData.balance || 0);
   const activeTier = getVipTierByBalance(currentBalance);
 
+  // Fixed: registration date now uses the same permissive timestamp
+  // parser (getMemberTimestamp) already relied on elsewhere in this file
+  // for the Team joining stats, instead of the stricter toMillis helper
+  // (which only recognizes a proper Firestore Timestamp object and
+  // returns nothing for any other stored shape — e.g. a plain number or
+  // ISO string — which is why this was showing "Not Recorded" even
+  // though the value was actually present and readable).
+  const registeredAtMs = getMemberTimestamp(userData.createdAt);
+
   return {
     success: true,
     detail: {
@@ -630,7 +642,7 @@ exports.adminGetUserDetail = onCall(async (request) => {
       walletAddress: userData.walletAddress || null,
       walletNetwork: userData.walletNetwork || null,
       walletAddressUpdatedAt: toMillis(userData.walletAddressUpdatedAt),
-      registeredAt: toMillis(userData.createdAt),
+      registeredAt: registeredAtMs > 0 ? registeredAtMs : null,
       deposits,
       balance: currentBalance,
       totalEarnings: Number(userData.totalEarnings || 0),
