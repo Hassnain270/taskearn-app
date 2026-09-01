@@ -204,9 +204,6 @@ function getVipTierByBalance(balance) {
 
 // Parses any of the timestamp shapes seen across this codebase
 // (Firestore Timestamp, epoch millis, ISO string) into epoch millis.
-// Used everywhere a stored createdAt-style field needs to be read, since
-// different parts of the app have historically written this field in
-// slightly different shapes.
 function getMemberTimestamp(createdAt) {
   if (!createdAt) return 0;
   if (typeof createdAt.toDate === "function") return createdAt.toDate().getTime();
@@ -285,6 +282,74 @@ function getEffectiveTaskCount(userData) {
   }
   return storedTaskCount;
 }
+
+// ============================================
+// ADMIN PUSH NOTIFICATIONS — sends an Expo push notification to every
+// admin account's registered device whenever a new withdrawal request
+// is submitted, so an admin can notice and review it even while busy
+// elsewhere. Uses Expo's push service directly (a plain HTTPS call),
+// which is the standard approach for Expo-managed apps and needs no
+// extra native setup beyond registering each admin device's token.
+// ============================================
+async function notifyAdminsOfNewWithdrawal(db, { username, amount }) {
+  try {
+    const adminsSnap = await db.collection("users").where("isAdmin", "==", true).get();
+    const tokens = [];
+    adminsSnap.forEach((docSnap) => {
+      const token = docSnap.data().expoPushToken;
+      if (token) tokens.push(token);
+    });
+
+    if (tokens.length === 0) return;
+
+    const messages = tokens.map((token) => ({
+      to: token,
+      sound: "default",
+      title: "New Withdrawal Request",
+      body: `${username || "A user"} requested a withdrawal of $${Number(amount).toFixed(2)} USDT.`,
+      data: { type: "WITHDRAWAL_REQUEST" },
+    }));
+
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "gzip, deflate",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(messages),
+    });
+  } catch (error) {
+    // Notification delivery is best-effort — never let a failure here
+    // affect the withdrawal request itself, which has already succeeded.
+    console.error("Failed to notify admins of new withdrawal:", error);
+  }
+}
+
+// ============================================
+// SAVE ADMIN PUSH TOKEN — called once from the app when an admin opens
+// the Admin Panel and grants notification permission.
+// ============================================
+exports.saveAdminPushToken = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const { expoPushToken } = request.data || {};
+  if (!expoPushToken || typeof expoPushToken !== "string") {
+    throw new HttpsError("invalid-argument", "A valid push token is required.");
+  }
+
+  const db = admin.firestore();
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!userDoc.exists || userDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may register for these notifications.");
+  }
+
+  await db.collection("users").doc(request.auth.uid).update({
+    expoPushToken: expoPushToken,
+  });
+
+  return { success: true };
+});
 
 // ============================================
 // CROSS-USER LOOKUPS
@@ -582,9 +647,6 @@ exports.adminGetUserDetail = onCall(async (request) => {
   const totalTeamSize = countSubTree(uid);
   const indirectTeamSize = totalTeamSize - directTeamCount;
 
-  // Joining breakdown — only DIRECT members are counted here (matching
-  // what the admin can attribute specifically to this user's own
-  // recruiting activity), broken down by when each one registered.
   const { dayResetUtcMs, weekResetUtcMs, weekLabel, monthResetUtcMs, monthLabel } = getPktResetBoundaries();
 
   let todayJoinings = 0;
@@ -597,11 +659,6 @@ exports.adminGetUserDetail = onCall(async (request) => {
     if (t >= monthResetUtcMs) monthJoinings++;
   });
 
-  // Deposit history — every confirmed deposit this user has made, newest
-  // first, so an admin can ask the user "what date and amount was your
-  // deposit?" as a verification question and cross-check the answer
-  // against real records (useful if someone claims to be a user whose
-  // account they don't actually own).
   const depositTxSnap = await db.collection("transactions")
     .where("userId", "==", uid)
     .where("type", "==", "DEPOSIT")
@@ -623,13 +680,6 @@ exports.adminGetUserDetail = onCall(async (request) => {
   const currentBalance = Number(userData.totalBalance || userData.balance || 0);
   const activeTier = getVipTierByBalance(currentBalance);
 
-  // Fixed: registration date now uses the same permissive timestamp
-  // parser (getMemberTimestamp) already relied on elsewhere in this file
-  // for the Team joining stats, instead of the stricter toMillis helper
-  // (which only recognizes a proper Firestore Timestamp object and
-  // returns nothing for any other stored shape — e.g. a plain number or
-  // ISO string — which is why this was showing "Not Recorded" even
-  // though the value was actually present and readable).
   const registeredAtMs = getMemberTimestamp(userData.createdAt);
 
   return {
@@ -844,6 +894,8 @@ exports.requestWithdrawal = onCall(async (request) => {
   const userRef = db.collection("users").doc(userId);
   const withdrawalsRef = db.collection("withdrawals");
 
+  let notifyUsername = null;
+
   try {
     await db.runTransaction(async (transaction) => {
       const pendingQuery = withdrawalsRef
@@ -859,6 +911,7 @@ exports.requestWithdrawal = onCall(async (request) => {
       if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
 
       const userData = userDoc.data();
+      notifyUsername = userData.username || userData.email || "A user";
 
       const storedWalletAddress = userData.walletAddress ? String(userData.walletAddress).trim() : "";
       if (!storedWalletAddress) {
@@ -919,6 +972,12 @@ exports.requestWithdrawal = onCall(async (request) => {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
+
+    // Fire the admin notification AFTER the transaction has committed
+    // successfully — this is a plain outbound HTTP call, so it cannot run
+    // inside the Firestore transaction itself. Its own success or failure
+    // never affects the withdrawal request, which is already saved.
+    await notifyAdminsOfNewWithdrawal(db, { username: notifyUsername, amount });
 
     return { success: true, message: "Withdrawal request submitted successfully." };
   } catch (error) {
@@ -2114,7 +2173,4 @@ exports.changeAccountPassword = onCall(async (request) => {
     await admin.auth().updateUser(request.auth.uid, { password: newPassword });
     return { success: true };
   } catch (error) {
-    console.error("Error changing account password:", error);
-    throw new HttpsError("internal", "Failed to update password. Please try again.");
-  }
-});
+    console.error("Error changing account 

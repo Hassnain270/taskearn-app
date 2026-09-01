@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import * as Linking from 'expo-linking';
+import * as Notifications from 'expo-notifications';
 import { auth } from './src/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
 import { ThemeProvider } from './ThemeContext';
@@ -35,6 +36,17 @@ import AdminWithdrawalsScreen from './src/screens/AdminWithdrawalsScreen';
 import AdminBonusConfigScreen from './src/screens/AdminBonusConfigScreen';
 import AdminUserManagementScreen from './src/screens/AdminUserManagementScreen';
 import PhoneVerifyScreen from './src/screens/PhoneVerifyScreen';
+
+// Ensures a notification banner/sound appears even while the app is open
+// in the foreground (Expo's default is to suppress this unless a handler
+// is explicitly set) — relevant for the admin withdrawal-request alert.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 class ErrorBoundary extends React.Component {
   state = { hasError: false, error: null, errorInfo: null };
