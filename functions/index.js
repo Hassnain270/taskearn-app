@@ -11,19 +11,11 @@ if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-// Formats a decimal rate (e.g. 0.10) as a clean percentage string (e.g.
-// "10") without unnecessary trailing zeros for non-round rates.
 function formatPercent(rate) {
   const value = rate * 100;
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
 
-// ============================================
-// TASKEARN AI SYSTEM PROMPT — built dynamically on every request so that
-// any bonus percentage the admin changes in Bonus Settings is reflected
-// immediately in what the assistant tells users, with no code change or
-// redeploy ever needed.
-// ============================================
 function buildSystemPrompt(rates) {
   const welcomePct = formatPercent(rates.welcomeBonusRate);
   const directPct = formatPercent(rates.directReferralRate);
@@ -154,13 +146,6 @@ const VIP_TIERS = [
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MASTER_REFERRAL_CODES = ["ADMIN1", "123456", "MASTER"];
 
-// ============================================
-// CENTRAL BONUS-RATES CONFIG — single source of truth for every
-// percentage used across the app (welcome bonus, referral bonuses, VIP
-// upgrade bonus, daily task profit rate), stored in Firestore at
-// config/bonusRates so it can be changed from one place, by an admin,
-// without editing or redeploying any code.
-// ============================================
 const DEFAULT_BONUS_RATES = {
   welcomeBonusRate: 0.07,
   directReferralRate: 0.10,
@@ -202,8 +187,6 @@ function getVipTierByBalance(balance) {
   return null;
 }
 
-// Parses any of the timestamp shapes seen across this codebase
-// (Firestore Timestamp, epoch millis, ISO string) into epoch millis.
 function getMemberTimestamp(createdAt) {
   if (!createdAt) return 0;
   if (typeof createdAt.toDate === "function") return createdAt.toDate().getTime();
@@ -272,9 +255,6 @@ function getEffectiveTaskCount(userData) {
   return storedTaskCount;
 }
 
-// ============================================
-// ADMIN PUSH NOTIFICATIONS
-// ============================================
 async function sendExpoPushMessages(messages) {
   const response = await fetch("https://exp.host/--/api/v2/push/send", {
     method: "POST",
@@ -291,7 +271,9 @@ async function sendExpoPushMessages(messages) {
   return result;
 }
 
-async function notifyAdminsOfNewWithdrawal(db, { username, amount }) {
+async function notifyAdminsOfNewWithdrawal(db, args) {
+  const username = args.username;
+  const amount = args.amount;
   try {
     const adminsSnap = await db.collection("users").where("isAdmin", "==", true).get();
     const tokens = [];
@@ -324,7 +306,7 @@ async function notifyAdminsOfNewWithdrawal(db, { username, amount }) {
 exports.saveAdminPushToken = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
-  const { expoPushToken } = request.data || {};
+  const expoPushToken = request.data ? request.data.expoPushToken : undefined;
   if (!expoPushToken || typeof expoPushToken !== "string") {
     throw new HttpsError("invalid-argument", "A valid push token is required.");
   }
@@ -344,10 +326,6 @@ exports.saveAdminPushToken = onCall(async (request) => {
   return { success: true };
 });
 
-// Lets an admin send a notification to themselves on demand, so they can
-// verify the entire pipeline (permission granted -> token saved in
-// Firestore -> Expo push service -> device) actually works, without
-// needing to wait for a real withdrawal request.
 exports.sendTestNotificationToMe = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
@@ -373,20 +351,17 @@ exports.sendTestNotificationToMe = onCall(async (request) => {
     data: { type: "TEST" },
   }]);
 
-  const ticket = Array.isArray(result?.data) ? result.data[0] : null;
+  const ticket = result && Array.isArray(result.data) ? result.data[0] : null;
   if (ticket && ticket.status === "error") {
-    throw new HttpsError("internal", `Expo rejected the notification: ${ticket.message || ticket.details?.error || "unknown error"}`);
+    const errMsg = (ticket.details && ticket.details.error) || ticket.message || "unknown error";
+    throw new HttpsError("internal", `Expo rejected the notification: ${errMsg}`);
   }
 
   return { success: true };
 });
 
-// ============================================
-// CROSS-USER LOOKUPS
-// ============================================
-
 exports.resolveLoginIdentifier = onCall(async (request) => {
-  const identifier = (request.data?.identifier || "").trim();
+  const identifier = ((request.data && request.data.identifier) || "").trim();
   if (!identifier) throw new HttpsError("invalid-argument", "Identifier is required.");
 
   const db = admin.firestore();
@@ -423,7 +398,11 @@ exports.resolveLoginIdentifier = onCall(async (request) => {
 });
 
 exports.checkRegistrationAvailability = onCall(async (request) => {
-  const { username, email, phone, referral } = request.data || {};
+  const data = request.data || {};
+  const username = data.username;
+  const email = data.email;
+  const phone = data.phone;
+  const referral = data.referral;
   const db = admin.firestore();
 
   const cleanUsername = (username || "").trim().toLowerCase();
@@ -474,7 +453,9 @@ exports.checkRegistrationAvailability = onCall(async (request) => {
 exports.updateWalletAddress = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const uid = request.auth.uid;
-  const { walletAddress, network } = request.data || {};
+  const data = request.data || {};
+  const walletAddress = data.walletAddress;
+  const network = data.network;
 
   if (!walletAddress || !network) {
     throw new HttpsError("invalid-argument", "Wallet address and network are required.");
@@ -521,9 +502,12 @@ exports.calculateTeamStats = onCall(async (request) => {
     const myRefCode = userData.referralCode || userData.referral || userId.substring(0, 6).toUpperCase();
 
     const usersSnapshot = await db.collection("users").get();
-    const allUsers = usersSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const allUsers = usersSnapshot.docs.map((doc) => Object.assign({ id: doc.id }, doc.data()));
 
-    const { dayResetUtcMs, monthResetUtcMs, monthLabel } = getPktResetBoundaries();
+    const boundaries = getPktResetBoundaries();
+    const dayResetUtcMs = boundaries.dayResetUtcMs;
+    const monthResetUtcMs = boundaries.monthResetUtcMs;
+    const monthLabel = boundaries.monthLabel;
 
     let globalTodayCount = 0;
     let globalMonthCount = 0;
@@ -558,7 +542,7 @@ exports.calculateTeamStats = onCall(async (request) => {
 
       return {
         id: d.id,
-        username: d.username || d.email?.split("@")[0] || "Member",
+        username: d.username || (d.email ? d.email.split("@")[0] : "Member"),
         totalSubTeam: subTreeCount,
       };
     });
@@ -581,10 +565,6 @@ exports.calculateTeamStats = onCall(async (request) => {
   }
 });
 
-// ============================================
-// ADMIN — USER LOOKUP AND MANAGEMENT
-// ============================================
-
 exports.adminSearchUsers = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
@@ -594,8 +574,8 @@ exports.adminSearchUsers = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Only administrators may search user accounts.");
   }
 
-  const { query } = request.data || {};
-  const cleanQuery = (query || "").trim();
+  const query = (request.data && request.data.query) || "";
+  const cleanQuery = query.trim();
   if (!cleanQuery) throw new HttpsError("invalid-argument", "A search value is required.");
 
   const results = new Map();
@@ -624,14 +604,14 @@ exports.adminSearchUsers = onCall(async (request) => {
 
   const lowerQuery = cleanQuery.toLowerCase();
 
-  const [usernameSnap, emailSnap, phoneSnap, walletSnap] = await Promise.all([
+  const snaps = await Promise.all([
     db.collection("users").where("username", "==", lowerQuery).limit(5).get(),
     db.collection("users").where("email", "==", lowerQuery).limit(5).get(),
     db.collection("users").where("phoneNumber", "==", cleanQuery).limit(5).get(),
     db.collection("users").where("walletAddress", "==", cleanQuery).limit(5).get(),
   ]);
 
-  [usernameSnap, emailSnap, phoneSnap, walletSnap].forEach((snap) => {
+  snaps.forEach((snap) => {
     snap.forEach((docSnap) => addDoc(docSnap));
   });
 
@@ -647,7 +627,7 @@ exports.adminGetUserDetail = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Only administrators may view user account details.");
   }
 
-  const { uid } = request.data || {};
+  const uid = request.data && request.data.uid;
   if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
 
   const userDoc = await db.collection("users").doc(uid).get();
@@ -661,7 +641,7 @@ exports.adminGetUserDetail = onCall(async (request) => {
   }
 
   const usersSnapshot = await db.collection("users").get();
-  const allUsers = usersSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const allUsers = usersSnapshot.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
   const directMembers = allUsers.filter((u) => u.referredByUid === uid);
   const directTeamCount = directMembers.length;
@@ -677,7 +657,12 @@ exports.adminGetUserDetail = onCall(async (request) => {
   const totalTeamSize = countSubTree(uid);
   const indirectTeamSize = totalTeamSize - directTeamCount;
 
-  const { dayResetUtcMs, weekResetUtcMs, weekLabel, monthResetUtcMs, monthLabel } = getPktResetBoundaries();
+  const boundaries = getPktResetBoundaries();
+  const dayResetUtcMs = boundaries.dayResetUtcMs;
+  const weekResetUtcMs = boundaries.weekResetUtcMs;
+  const weekLabel = boundaries.weekLabel;
+  const monthResetUtcMs = boundaries.monthResetUtcMs;
+  const monthLabel = boundaries.monthLabel;
 
   let todayJoinings = 0;
   let weekJoinings = 0;
@@ -715,7 +700,7 @@ exports.adminGetUserDetail = onCall(async (request) => {
   return {
     success: true,
     detail: {
-      uid,
+      uid: uid,
       username: userData.username || null,
       email: userData.email || null,
       phoneNumber: userData.phoneNumber || userData.phone || null,
@@ -723,21 +708,21 @@ exports.adminGetUserDetail = onCall(async (request) => {
       walletNetwork: userData.walletNetwork || null,
       walletAddressUpdatedAt: toMillis(userData.walletAddressUpdatedAt),
       registeredAt: registeredAtMs > 0 ? registeredAtMs : null,
-      deposits,
+      deposits: deposits,
       balance: currentBalance,
       totalEarnings: Number(userData.totalEarnings || 0),
       totalWithdraw: Number(userData.totalWithdraw || 0),
       teamReward: Number(userData.teamReward || 0),
       currentVip: activeTier ? activeTier.name : "No VIP",
-      directTeamCount,
-      indirectTeamSize,
-      totalTeamSize,
-      todayJoinings,
-      weekJoinings,
-      weekLabel,
-      monthJoinings,
-      monthLabel,
-      referrerUsername,
+      directTeamCount: directTeamCount,
+      indirectTeamSize: indirectTeamSize,
+      totalTeamSize: totalTeamSize,
+      todayJoinings: todayJoinings,
+      weekJoinings: weekJoinings,
+      weekLabel: weekLabel,
+      monthJoinings: monthJoinings,
+      monthLabel: monthLabel,
+      referrerUsername: referrerUsername,
       isAdmin: userData.isAdmin === true,
     },
   };
@@ -752,7 +737,13 @@ exports.adminUpdateUserData = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Only administrators may edit user accounts.");
   }
 
-  const { uid, email, phoneNumber, walletAddress, balance, balanceReason } = request.data || {};
+  const data = request.data || {};
+  const uid = data.uid;
+  const email = data.email;
+  const phoneNumber = data.phoneNumber;
+  const walletAddress = data.walletAddress;
+  const balance = data.balance;
+  const balanceReason = data.balanceReason;
   if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
 
   const userRef = db.collection("users").doc(uid);
@@ -857,11 +848,6 @@ exports.adminUpdateUserData = onCall(async (request) => {
   return { success: true };
 });
 
-// ============================================
-// WITHDRAWAL OTP — validates wallet configured, 5/5 daily tasks
-// completed, and no existing pending withdrawal BEFORE the verification
-// code is even sent.
-// ============================================
 exports.requestWithdrawalOtp = onCall(
   { secrets: ["BREVO_API_KEY"] },
   async (request) => {
@@ -914,7 +900,10 @@ exports.requestWithdrawal = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
   const userId = request.auth.uid;
-  const { amount, fee, netPayout } = request.data || {};
+  const data = request.data || {};
+  const amount = data.amount;
+  const fee = data.fee;
+  const netPayout = data.netPayout;
 
   if (!amount || amount < 15) {
     throw new HttpsError("invalid-argument", "Minimum withdrawal amount is $15.00.");
@@ -1003,7 +992,7 @@ exports.requestWithdrawal = onCall(async (request) => {
       });
     });
 
-    await notifyAdminsOfNewWithdrawal(db, { username: notifyUsername, amount });
+    await notifyAdminsOfNewWithdrawal(db, { username: notifyUsername, amount: amount });
 
     return { success: true, message: "Withdrawal request submitted successfully." };
   } catch (error) {
@@ -1012,8 +1001,6 @@ exports.requestWithdrawal = onCall(async (request) => {
     throw new HttpsError("internal", error.message || "Failed to submit withdrawal request.");
   }
 });
-
-// ---------- AUTOMATIC WITHDRAWAL PAYOUT (master wallet -> user's wallet) ----------
 
 const BSC_RPC = "https://bsc-dataseed.binance.org/";
 const USDT_BSC_CONTRACT = "0x55d398326f99059ff775485246999027b3197955";
@@ -1067,7 +1054,7 @@ async function sendTRC20Payout(mnemonic, toAddress, amount) {
   }
 
   const trxBalance = await tronWeb.trx.getBalance(masterAddress);
-  const minTrxReserve = 15_000_000;
+  const minTrxReserve = 15000000;
   if (trxBalance < minTrxReserve) {
     throw new Error("Master wallet has insufficient TRX to cover the network fee.");
   }
@@ -1083,7 +1070,10 @@ exports.updateWithdrawalStatus = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
     const adminUid = request.auth.uid;
-    const { withdrawalId, newStatus, reason } = request.data || {};
+    const data = request.data || {};
+    const withdrawalId = data.withdrawalId;
+    const newStatus = data.newStatus;
+    const reason = data.reason;
 
     if (!withdrawalId || !["completed", "rejected"].includes(newStatus)) {
       throw new HttpsError("invalid-argument", "A valid withdrawalId and newStatus ('completed' or 'rejected') are required.");
@@ -1123,17 +1113,21 @@ exports.updateWithdrawalStatus = onCall(
           const userRef = db.collection("users").doc(targetUserId);
           const linkedTxQuery = db.collection("transactions").where("withdrawalId", "==", withdrawalId).limit(1);
 
-          const [userDoc, linkedTxSnap] = await Promise.all([
+          const results = await Promise.all([
             transaction.get(userRef),
             transaction.get(linkedTxQuery),
           ]);
+          const userDoc = results[0];
+          const linkedTxSnap = results[1];
           const linkedTxRef = !linkedTxSnap.empty ? linkedTxSnap.docs[0].ref : null;
 
-          transaction.update(withdrawalRef, {
-            status: "rejected",
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            ...(cleanReason ? { rejectionReason: cleanReason } : {}),
-          });
+          transaction.update(withdrawalRef, Object.assign(
+            {
+              status: "rejected",
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            cleanReason ? { rejectionReason: cleanReason } : {}
+          ));
 
           if (userDoc.exists) {
             const userData = userDoc.data();
@@ -1255,26 +1249,21 @@ exports.updateWithdrawalStatus = onCall(
   }
 );
 
-// ============================================
-// DEPOSIT SYSTEM (server-side verified, unique address per request,
-// with automatic sweep of confirmed deposits into the master wallet)
-// ============================================
-
 async function createPendingDepositRecord(db, userId, network, address, expectedAmount, derivationIndex) {
   const depositRef = db.collection("depositAddresses").doc();
-  const expiresAt = Date.now() + 3 * 60 * 60 * 1000; // 3 hours
+  const expiresAt = Date.now() + 3 * 60 * 60 * 1000;
   await depositRef.set({
     depositId: depositRef.id,
-    userId,
-    network,
-    address,
-    derivationIndex,
+    userId: userId,
+    network: network,
+    address: address,
+    derivationIndex: derivationIndex,
     expectedAmount: Number(expectedAmount) || 0,
     status: "pending",
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    expiresAt,
+    expiresAt: expiresAt,
   });
-  return { depositId: depositRef.id, expiresAt };
+  return { depositId: depositRef.id, expiresAt: expiresAt };
 }
 
 exports.generateDepositAddress = onCall(
@@ -1283,7 +1272,7 @@ exports.generateDepositAddress = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
     const userId = request.auth.uid;
-    const amount = Number(request.data?.amount) || 0;
+    const amount = Number(request.data && request.data.amount) || 0;
     if (amount <= 0) throw new HttpsError("invalid-argument", "A valid deposit amount is required.");
 
     const db = admin.firestore();
@@ -1310,9 +1299,9 @@ exports.generateDepositAddress = onCall(
       const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io" });
       const newAddress = tronWeb.address.fromPrivateKey(privateKeyHex);
 
-      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "TRC20", newAddress, amount, assignedIndex);
+      const result = await createPendingDepositRecord(db, userId, "TRC20", newAddress, amount, assignedIndex);
 
-      return { address: newAddress, depositId, expiresAt };
+      return { address: newAddress, depositId: result.depositId, expiresAt: result.expiresAt };
     } catch (error) {
       console.error("Error generating TRC20 address:", error);
       throw new HttpsError("internal", error.message || "Address generation failed.");
@@ -1326,7 +1315,7 @@ exports.generateBEP20Address = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
     const userId = request.auth.uid;
-    const amount = Number(request.data?.amount) || 0;
+    const amount = Number(request.data && request.data.amount) || 0;
     if (amount <= 0) throw new HttpsError("invalid-argument", "A valid deposit amount is required.");
 
     const db = admin.firestore();
@@ -1351,9 +1340,9 @@ exports.generateBEP20Address = onCall(
       );
       const newAddress = walletNode.address;
 
-      const { depositId, expiresAt } = await createPendingDepositRecord(db, userId, "BEP20", newAddress, amount, assignedIndex);
+      const result = await createPendingDepositRecord(db, userId, "BEP20", newAddress, amount, assignedIndex);
 
-      return { address: newAddress, depositId, expiresAt };
+      return { address: newAddress, depositId: result.depositId, expiresAt: result.expiresAt };
     } catch (error) {
       console.error("Error generating BEP20 address:", error);
       throw new HttpsError("internal", error.message || "Address generation failed.");
@@ -1503,7 +1492,7 @@ async function checkTRC20OnChainServer(address, expectedAmount) {
 
     const usdtContract = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
     for (const tx of data.data) {
-      if (tx.token_info?.address === usdtContract && tx.to === address) {
+      if (tx.token_info && tx.token_info.address === usdtContract && tx.to === address) {
         const receivedAmount = parseFloat(tx.value) / 1000000;
         if (receivedAmount >= 0.5) {
           return { amount: receivedAmount, txId: tx.transaction_id };
@@ -1545,7 +1534,7 @@ async function checkBEP20OnChainServer(address) {
     }
 
     console.log(`[BEP20 CHECK] Deposit confirmed for ${address}: amount=${receivedAmount} txId=${txId}`);
-    return { amount: receivedAmount, txId };
+    return { amount: receivedAmount, txId: txId };
   } catch (error) {
     console.error("BEP20 on-chain check error:", error.message, error);
     return null;
@@ -1605,7 +1594,7 @@ async function sweepTRC20Deposit(mnemonic, derivationIndex) {
   const childAddress = childTronWeb.address.fromPrivateKey(childPrivateKeyHex);
 
   const childTrxBalance = await childTronWeb.trx.getBalance(childAddress);
-  const feeReserveSun = 15_000_000;
+  const feeReserveSun = 15000000;
 
   console.log(`[SWEEP-TRC20] child=${childAddress} master=${masterAddress} childTrx=${childTrxBalance}`);
 
@@ -1782,8 +1771,8 @@ exports.completeTask = onCall(async (request) => {
       transaction.set(taskTaskRef, {
         profit: calculatedProfit,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        productName: request.data?.productName || "E-commerce Task",
-        orderId: request.data?.orderId || taskTaskRef.id.substring(0, 8).toUpperCase(),
+        productName: (request.data && request.data.productName) || "E-commerce Task",
+        orderId: (request.data && request.data.orderId) || taskTaskRef.id.substring(0, 8).toUpperCase(),
       });
     });
 
@@ -1793,10 +1782,6 @@ exports.completeTask = onCall(async (request) => {
     throw new HttpsError("internal", error.message || "Failed to complete task.");
   }
 });
-
-// ============================================
-// EMAIL OTP — sent via Brevo's transactional email API.
-// ============================================
 
 async function sendOtpEmailInternal(db, targetEmail, purpose) {
   const otpRef = db.collection("otps").doc(targetEmail);
@@ -1862,7 +1847,10 @@ async function sendOtpEmailInternal(db, targetEmail, purpose) {
 exports.sendEmailOTP = onCall(
   { secrets: ["BREVO_API_KEY"] },
   async (request) => {
-    const { purpose, emailInput, username } = request.data || {};
+    const data = request.data || {};
+    const purpose = data.purpose;
+    const emailInput = data.emailInput;
+    const username = data.username;
     const db = admin.firestore();
     let targetEmail = emailInput;
 
@@ -1884,7 +1872,10 @@ exports.sendEmailOTP = onCall(
 );
 
 exports.verifyEmailOTP = onCall(async (request) => {
-  const { email, code, purpose } = request.data || {};
+  const data = request.data || {};
+  const email = data.email;
+  const code = data.code;
+  const purpose = data.purpose;
   if (!email || !code || !purpose) throw new HttpsError("invalid-argument", "Missing required fields.");
 
   const db = admin.firestore();
@@ -1918,15 +1909,12 @@ exports.verifyEmailOTP = onCall(async (request) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return { success: true, verified: true, resetToken };
+    return { success: true, verified: true, resetToken: resetToken };
   }
 
   return { success: true, verified: true };
 });
 
-// ============================================
-// WEBVIEW SESSION PASS
-// ============================================
 exports.issueWebViewSessionToken = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in.");
@@ -1941,9 +1929,6 @@ exports.issueWebViewSessionToken = onCall(async (request) => {
   }
 });
 
-// ============================================
-// PHONE OTP FALLBACK (Forgot Password)
-// ============================================
 exports.issuePasswordResetTokenForPhone = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Phone verification did not complete. Please try again.");
@@ -1967,14 +1952,13 @@ exports.issuePasswordResetTokenForPhone = onCall(async (request) => {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  return { success: true, resetToken };
+  return { success: true, resetToken: resetToken };
 });
 
-// ============================================
-// RESET PASSWORD
-// ============================================
 exports.resetUserPassword = onCall(async (request) => {
-  const { resetToken, newPassword } = request.data || {};
+  const data = request.data || {};
+  const resetToken = data.resetToken;
+  const newPassword = data.newPassword;
 
   if (!resetToken || !newPassword) {
     throw new HttpsError("invalid-argument", "Reset token and new password are required.");
@@ -2008,13 +1992,10 @@ exports.resetUserPassword = onCall(async (request) => {
   }
 });
 
-// ============================================
-// DUPLICATE EMAIL / PHONE CHECKS (used before Security screen changes)
-// ============================================
 exports.checkNewEmailAvailable = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
-  const { email } = request.data || {};
+  const email = request.data && request.data.email;
   if (!email) throw new HttpsError("invalid-argument", "Email is required.");
 
   const db = admin.firestore();
@@ -2031,7 +2012,7 @@ exports.checkNewEmailAvailable = onCall(async (request) => {
 exports.checkNewPhoneAvailable = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
-  const { phone } = request.data || {};
+  const phone = request.data && request.data.phone;
   if (!phone) throw new HttpsError("invalid-argument", "Phone number is required.");
 
   const db = admin.firestore();
@@ -2045,14 +2026,11 @@ exports.checkNewPhoneAvailable = onCall(async (request) => {
   return { success: true, available: true };
 });
 
-// ============================================
-// BONUS CONFIG — read/update the central bonus-rates document.
-// ============================================
 exports.getBonusConfig = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
   const rates = await getBonusRates(db);
-  return { success: true, rates };
+  return { success: true, rates: rates };
 });
 
 exports.updateBonusConfig = onCall(async (request) => {
@@ -2064,7 +2042,12 @@ exports.updateBonusConfig = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Only administrators may update bonus rates.");
   }
 
-  const { welcomeBonusRate, directReferralRate, indirectReferralRate, vipUpgradeRate, dailyTaskProfitRate } = request.data || {};
+  const data = request.data || {};
+  const welcomeBonusRate = data.welcomeBonusRate;
+  const directReferralRate = data.directReferralRate;
+  const indirectReferralRate = data.indirectReferralRate;
+  const vipUpgradeRate = data.vipUpgradeRate;
+  const dailyTaskProfitRate = data.dailyTaskProfitRate;
   const updates = {};
 
   const validateRate = (name, value, max) => {
@@ -2094,10 +2077,6 @@ exports.updateBonusConfig = onCall(async (request) => {
   return { success: true, rates: newRates };
 });
 
-// ============================================
-// CHAT WITH SUPPORT AI (GROQ - MULTI-MODEL FALLBACK CHAIN)
-// ============================================
-
 const GROQ_MODEL_CHAIN = [
   "openai/gpt-oss-120b",
   "openai/gpt-oss-20b",
@@ -2114,7 +2093,7 @@ async function tryGroqModels(groq, messages, maxTokens) {
         temperature: 0.3,
         max_tokens: maxTokens,
       });
-      const text = completion.choices[0]?.message?.content;
+      const text = completion.choices[0] && completion.choices[0].message && completion.choices[0].message.content;
       if (text) return text;
     } catch (err) {
       lastError = err;
@@ -2128,13 +2107,13 @@ exports.chatWithSupportAI = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
-    const userMessage = request.data?.message;
+    const userMessage = request.data && request.data.message;
     if (!userMessage || typeof userMessage !== "string" || userMessage.trim().length === 0) {
       throw new HttpsError("invalid-argument", "Message is required.");
     }
     if (userMessage.length > 1000) throw new HttpsError("invalid-argument", "Message is too long.");
 
-    const history = Array.isArray(request.data?.history) ? request.data.history.slice(-10) : [];
+    const history = Array.isArray(request.data && request.data.history) ? request.data.history.slice(-10) : [];
 
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new HttpsError("internal", "API Key configuration missing.");
@@ -2147,12 +2126,14 @@ exports.chatWithSupportAI = onCall(
 
     const messages = [
       { role: "system", content: systemPrompt },
-      ...history.map((h) => ({
+    ].concat(
+      history.map((h) => ({
         role: h.role === "user" ? "user" : "assistant",
         content: String(h.text || "").slice(0, 1000),
-      })),
+      }))
+    ).concat([
       { role: "user", content: userMessage.trim() },
-    ];
+    ]);
 
     try {
       let replyText = await tryGroqModels(groq, messages, 3072);
@@ -2182,14 +2163,21 @@ exports.chatWithSupportAI = onCall(
   }
 );
 
-// ============================================
-// LOGGED-IN PASSWORD CHANGE (Security screen)
-// ============================================
 exports.changeAccountPassword = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in.");
   }
 
-  const { newPassword } = request.data || {};
+  const newPassword = request.data && request.data.newPassword;
   if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
-    throw new HttpsError
+    throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
+  }
+
+  try {
+    await admin.auth().updateUser(request.auth.uid, { password: newPassword });
+    return { success: true };
+  } catch (error) {
+    console.error("Error changing account password:", error);
+    throw new HttpsError("internal", "Failed to update password. Please try again.");
+  }
+});
