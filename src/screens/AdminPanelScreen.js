@@ -7,7 +7,9 @@ import {
   ScrollView,
   SafeAreaView,
   StatusBar,
-  Platform
+  Platform,
+  Alert,
+  ActivityIndicator
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -18,12 +20,22 @@ import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
 
+const showAlert = (title, message) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
+
 export default function AdminPanelScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
   const [accessChecked, setAccessChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [pushStatus, setPushStatus] = useState('checking'); // checking | registered | denied | unsupported | error
+  const [testSending, setTestSending] = useState(false);
 
   useEffect(() => {
     const checkAccessAndRegisterPush = async () => {
@@ -49,15 +61,17 @@ export default function AdminPanelScreen({ navigation }) {
     checkAccessAndRegisterPush();
   }, []);
 
-  // Requests notification permission (if not already granted) and saves
-  // this device's Expo push token against the admin's own user document,
-  // so the backend can alert them the moment a new withdrawal request
-  // comes in. Silently does nothing on web or on a simulator, since push
-  // notifications require a real device.
   const registerForWithdrawalNotifications = async () => {
     try {
-      if (Platform.OS === 'web') return;
-      if (!Device.isDevice) return;
+      if (Platform.OS === 'web') {
+        setPushStatus('unsupported');
+        return;
+      }
+      if (!Device.isDevice) {
+        setPushStatus('unsupported');
+        showAlert('Notifications Unavailable', 'Push notifications only work on a real device, not a simulator/emulator.');
+        return;
+      }
 
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -67,7 +81,11 @@ export default function AdminPanelScreen({ navigation }) {
         finalStatus = status;
       }
 
-      if (finalStatus !== 'granted') return;
+      if (finalStatus !== 'granted') {
+        setPushStatus('denied');
+        showAlert('Permission Denied', 'Notification permission was not granted, so withdrawal alerts cannot be delivered to this device. You can enable it from your phone\'s system Settings > Apps > TaskEarn > Notifications.');
+        return;
+      }
 
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
@@ -82,14 +100,33 @@ export default function AdminPanelScreen({ navigation }) {
       );
       const expoPushToken = tokenResponse.data;
 
-      if (expoPushToken) {
-        const saveToken = httpsCallable(functions, 'saveAdminPushToken');
-        await saveToken({ expoPushToken });
+      if (!expoPushToken) {
+        setPushStatus('error');
+        showAlert('Registration Failed', 'Could not obtain a push token from Expo. Please try reopening this screen.');
+        return;
       }
+
+      const saveToken = httpsCallable(functions, 'saveAdminPushToken');
+      await saveToken({ expoPushToken });
+
+      setPushStatus('registered');
     } catch (err) {
-      // Non-critical — if registration fails, the admin simply won't
-      // receive push notifications until it succeeds on a later visit.
       console.log('Push notification registration failed:', err);
+      setPushStatus('error');
+      showAlert('Registration Failed', err.message || 'Could not register this device for notifications. Please try reopening this screen.');
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    setTestSending(true);
+    try {
+      const testFn = httpsCallable(functions, 'sendTestNotificationToMe');
+      await testFn();
+      showAlert('Test Sent', 'A test notification was sent to this device. If it doesn\'t appear within a few seconds, check that notification permission is granted for TaskEarn in your phone\'s system Settings.');
+    } catch (err) {
+      showAlert('Test Failed', err.message || 'Failed to send test notification.');
+    } finally {
+      setTestSending(false);
     }
   };
 
@@ -141,6 +178,16 @@ export default function AdminPanelScreen({ navigation }) {
     },
   ];
 
+  const statusLabel = {
+    checking: 'Checking notification status...',
+    registered: 'Withdrawal request notifications are enabled for this device.',
+    denied: 'Notification permission was denied for this device.',
+    unsupported: 'Push notifications are not available on this device/platform.',
+    error: 'Something went wrong registering this device for notifications.',
+  }[pushStatus];
+
+  const statusColor = pushStatus === 'registered' ? '#10B981' : (pushStatus === 'checking' ? '#3B82F6' : '#F59E0B');
+
   return (
     <SafeAreaView style={currentStyles.container}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
@@ -178,12 +225,27 @@ export default function AdminPanelScreen({ navigation }) {
           ))}
         </View>
 
-        <View style={currentStyles.noteBox}>
-          <MaterialCommunityIcons name="bell-check-outline" size={16} color="#3B82F6" />
-          <Text style={currentStyles.noteText}>
-            Withdrawal request notifications are now enabled for this device.
-          </Text>
+        <Text style={currentStyles.sectionLabel}>WITHDRAWAL NOTIFICATIONS</Text>
+        <View style={[currentStyles.noteBox, { borderColor: statusColor + '55' }]}>
+          <MaterialCommunityIcons
+            name={pushStatus === 'registered' ? "bell-check-outline" : "bell-alert-outline"}
+            size={16}
+            color={statusColor}
+          />
+          <Text style={[currentStyles.noteText, { color: statusColor }]}>{statusLabel}</Text>
         </View>
+
+        <TouchableOpacity
+          style={[styles.testBtn, pushStatus !== 'registered' && styles.testBtnDisabled]}
+          onPress={handleSendTestNotification}
+          disabled={pushStatus !== 'registered' || testSending}
+        >
+          {testSending ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Text style={styles.testBtnText}>Send Test Notification to This Device</Text>
+          )}
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -199,8 +261,9 @@ const lightStyles = StyleSheet.create({
   iconWrapper: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   optionTitle: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
   divider: { height: 1, backgroundColor: '#F1F5F9', marginLeft: 70 },
-  noteBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, marginTop: 16, borderWidth: 1, borderColor: '#BFDBFE' },
-  noteText: { flex: 1, fontSize: 11, color: '#1D4ED8', fontWeight: '500', lineHeight: 15 }
+  sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginTop: 20, marginBottom: 10 },
+  noteBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 12, borderWidth: 1 },
+  noteText: { flex: 1, fontSize: 11, fontWeight: '600', lineHeight: 15 }
 });
 
 const darkStyles = StyleSheet.create({
@@ -213,8 +276,9 @@ const darkStyles = StyleSheet.create({
   iconWrapper: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   optionTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
   divider: { height: 1, backgroundColor: '#21262D', marginLeft: 70 },
-  noteBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#0B1E3A', borderRadius: 12, padding: 12, marginTop: 16, borderWidth: 1, borderColor: '#1E3A5F' },
-  noteText: { flex: 1, fontSize: 11, color: '#93C5FD', fontWeight: '500', lineHeight: 15 }
+  sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginTop: 20, marginBottom: 10 },
+  noteBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#161B22', borderRadius: 12, padding: 12, borderWidth: 1 },
+  noteText: { flex: 1, fontSize: 11, fontWeight: '600', lineHeight: 15 }
 });
 
 const styles = StyleSheet.create({
@@ -223,5 +287,8 @@ const styles = StyleSheet.create({
   optionTextBlock: { flex: 1 },
   optionSubtitle: { fontSize: 11, color: '#94A3B8', fontWeight: '500', marginTop: 3, lineHeight: 15 },
   accessDeniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 40 },
-  accessDeniedText: { fontSize: 13, color: '#94A3B8', fontWeight: '500', textAlign: 'center' }
+  accessDeniedText: { fontSize: 13, color: '#94A3B8', fontWeight: '500', textAlign: 'center' },
+  testBtn: { backgroundColor: '#3B82F6', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 14 },
+  testBtnDisabled: { backgroundColor: '#94A3B8' },
+  testBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' }
 });

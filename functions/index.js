@@ -213,10 +213,6 @@ function getMemberTimestamp(createdAt) {
   return 0;
 }
 
-// Computes the day/week/month boundaries (PKT, 9 PM daily reset, matching
-// every other reset boundary in this file), plus human-readable date
-// range labels for the week and month, used for the admin's joining
-// breakdown.
 function getPktResetBoundaries() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -235,8 +231,6 @@ function getPktResetBoundaries() {
   ));
   const dayResetUtcMs = dayResetPkt.getTime() - 5 * 3600000 - now.getTimezoneOffset() * 60000;
 
-  // A rolling 7-day window ending on the current day (inclusive), rather
-  // than a fixed Mon-Sun week — simplest to reason about and to label.
   const weekResetPkt = new Date(dayResetPkt);
   weekResetPkt.setUTCDate(weekResetPkt.getUTCDate() - 6);
   const weekResetUtcMs = weekResetPkt.getTime() - 5 * 3600000 - now.getTimezoneOffset() * 60000;
@@ -262,11 +256,6 @@ function getPktResetBoundaries() {
   return { dayResetUtcMs, weekResetUtcMs, weekLabel, monthResetUtcMs, monthLabel };
 }
 
-// Returns the user's effective completed-task count for TODAY, applying
-// the same 4 PM UTC daily reset boundary used everywhere else
-// (TasksScreen, completeTask). A stored taskCount from a previous day
-// (stale lastTaskReset) is treated as 0, so a user can't rely on
-// yesterday's completed-tasks count to pass today's withdrawal check.
 function getEffectiveTaskCount(userData) {
   const now = new Date();
   let lastResetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 16, 0, 0));
@@ -284,13 +273,24 @@ function getEffectiveTaskCount(userData) {
 }
 
 // ============================================
-// ADMIN PUSH NOTIFICATIONS — sends an Expo push notification to every
-// admin account's registered device whenever a new withdrawal request
-// is submitted, so an admin can notice and review it even while busy
-// elsewhere. Uses Expo's push service directly (a plain HTTPS call),
-// which is the standard approach for Expo-managed apps and needs no
-// extra native setup beyond registering each admin device's token.
+// ADMIN PUSH NOTIFICATIONS
 // ============================================
+async function sendExpoPushMessages(messages) {
+  const response = await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Accept-Encoding": "gzip, deflate",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(messages),
+  });
+
+  const result = await response.json();
+  console.log("[PUSH] Expo push service response:", JSON.stringify(result));
+  return result;
+}
+
 async function notifyAdminsOfNewWithdrawal(db, { username, amount }) {
   try {
     const adminsSnap = await db.collection("users").where("isAdmin", "==", true).get();
@@ -300,7 +300,12 @@ async function notifyAdminsOfNewWithdrawal(db, { username, amount }) {
       if (token) tokens.push(token);
     });
 
-    if (tokens.length === 0) return;
+    console.log(`[PUSH] Found ${adminsSnap.size} admin account(s), ${tokens.length} with a registered push token.`);
+
+    if (tokens.length === 0) {
+      console.log("[PUSH] No admin push tokens on file — nothing to send. An admin needs to open Admin Panel once to register.");
+      return;
+    }
 
     const messages = tokens.map((token) => ({
       to: token,
@@ -310,26 +315,12 @@ async function notifyAdminsOfNewWithdrawal(db, { username, amount }) {
       data: { type: "WITHDRAWAL_REQUEST" },
     }));
 
-    await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Accept-Encoding": "gzip, deflate",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(messages),
-    });
+    await sendExpoPushMessages(messages);
   } catch (error) {
-    // Notification delivery is best-effort — never let a failure here
-    // affect the withdrawal request itself, which has already succeeded.
     console.error("Failed to notify admins of new withdrawal:", error);
   }
 }
 
-// ============================================
-// SAVE ADMIN PUSH TOKEN — called once from the app when an admin opens
-// the Admin Panel and grants notification permission.
-// ============================================
 exports.saveAdminPushToken = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
@@ -347,6 +338,45 @@ exports.saveAdminPushToken = onCall(async (request) => {
   await db.collection("users").doc(request.auth.uid).update({
     expoPushToken: expoPushToken,
   });
+
+  console.log(`[PUSH] Saved push token for admin ${request.auth.uid}: ${expoPushToken}`);
+
+  return { success: true };
+});
+
+// Lets an admin send a notification to themselves on demand, so they can
+// verify the entire pipeline (permission granted -> token saved in
+// Firestore -> Expo push service -> device) actually works, without
+// needing to wait for a real withdrawal request.
+exports.sendTestNotificationToMe = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const db = admin.firestore();
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!userDoc.exists || userDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may use this test.");
+  }
+
+  const token = userDoc.data().expoPushToken;
+  if (!token) {
+    throw new HttpsError(
+      "failed-precondition",
+      "No push token is saved for your account yet. Please close and reopen the Admin Panel screen to register one."
+    );
+  }
+
+  const result = await sendExpoPushMessages([{
+    to: token,
+    sound: "default",
+    title: "Test Notification",
+    body: "If you can see this, withdrawal alerts are working correctly.",
+    data: { type: "TEST" },
+  }]);
+
+  const ticket = Array.isArray(result?.data) ? result.data[0] : null;
+  if (ticket && ticket.status === "error") {
+    throw new HttpsError("internal", `Expo rejected the notification: ${ticket.message || ticket.details?.error || "unknown error"}`);
+  }
 
   return { success: true };
 });
@@ -973,10 +1003,6 @@ exports.requestWithdrawal = onCall(async (request) => {
       });
     });
 
-    // Fire the admin notification AFTER the transaction has committed
-    // successfully — this is a plain outbound HTTP call, so it cannot run
-    // inside the Firestore transaction itself. Its own success or failure
-    // never affects the withdrawal request, which is already saved.
     await notifyAdminsOfNewWithdrawal(db, { username: notifyUsername, amount });
 
     return { success: true, message: "Withdrawal request submitted successfully." };
@@ -2166,11 +2192,4 @@ exports.changeAccountPassword = onCall(async (request) => {
 
   const { newPassword } = request.data || {};
   if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
-    throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
-  }
-
-  try {
-    await admin.auth().updateUser(request.auth.uid, { password: newPassword });
-    return { success: true };
-  } catch (error) {
-    console.error("Error changing account 
+    throw new HttpsError
