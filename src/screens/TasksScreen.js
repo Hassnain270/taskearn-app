@@ -47,7 +47,10 @@ export default function TasksScreen({ navigation }) {
   // Defaults to the standard rate while the real value loads from the
   // central config, so the estimate shown before confirming a task is
   // never wrong for more than a moment. The actual credited amount always
-  // comes from the backend's own (equally centralized) calculation.
+  // comes from the backend's own (equally centralized) calculation — and,
+  // as of this update, the backend also randomizes that amount slightly
+  // per order across the day's 5 tasks, so this local estimate is only
+  // ever an approximate preview shown before a task is confirmed.
   const [dailyTaskProfitRate, setDailyTaskProfitRate] = useState(0.0032);
 
   const cycleKeyRef = useRef(null);
@@ -412,7 +415,7 @@ export default function TasksScreen({ navigation }) {
             ) : (
               <>
                 <View style={[styles.iconCircle, { backgroundColor: isDarkMode ? "#1E293B" : "#EFF6FF" }]}>
-                  <MaterialCommunityIcons name="clipboard-text" size={36} color="#3B82F6" />
+                  <Image source={require('../../assets/icon.png')} style={styles.workLogo} resizeMode="contain" />
                 </View>
                 <Text style={currentStyles.workTitle}>Earn Rewards</Text>
                 <Text style={currentStyles.workSub}>Click the button below to grab your daily e-commerce verification tasks.</Text>
@@ -621,6 +624,7 @@ const styles = StyleSheet.create({
   timerRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
   timerText: { fontSize: 11, fontWeight: '600', color: '#3B82F6' },
   iconCircle: { width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center' },
+  workLogo: { width: 40, height: 40, borderRadius: 8 },
   productIconCircle: { width: 76, height: 76, borderRadius: 38, justifyContent: 'center', alignItems: 'center', borderWidth: 2, marginBottom: 12 },
   grabBtn: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 50, borderRadius: 16, justifyContent: 'center', alignItems: 'center', shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
   disabledBtn: { backgroundColor: '#94A3B8', shadowOpacity: 0 },

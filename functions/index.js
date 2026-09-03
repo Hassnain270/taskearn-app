@@ -255,6 +255,29 @@ function getEffectiveTaskCount(userData) {
   return storedTaskCount;
 }
 
+// Splits a total amount into `count` randomized positive parts that sum
+// to EXACTLY that total (to the cent) — used so each of the day's 5
+// tasks shows a different profit amount while the day's overall total
+// stays precisely equal to what the configured daily rate produces.
+// Weights are kept within a moderate range (0.6x-1.4x of an even share)
+// so no single task looks implausibly large or near-zero.
+function generateRandomSplits(total, count) {
+  if (total <= 0) return new Array(count).fill(0);
+
+  const weights = [];
+  for (let i = 0; i < count; i++) {
+    weights.push(0.6 + Math.random() * 0.8);
+  }
+  const weightSum = weights.reduce((a, b) => a + b, 0);
+
+  const splits = weights.map((w) => Number(((w / weightSum) * total).toFixed(2)));
+  const roundedSum = splits.reduce((a, b) => a + b, 0);
+  const diff = Number((total - roundedSum).toFixed(2));
+  splits[splits.length - 1] = Number((splits[splits.length - 1] + diff).toFixed(2));
+
+  return splits;
+}
+
 async function sendExpoPushMessages(messages) {
   const response = await fetch("https://exp.host/--/api/v2/push/send", {
     method: "POST",
@@ -282,10 +305,7 @@ async function notifyAdminsOfNewWithdrawal(db, args) {
       if (token) tokens.push(token);
     });
 
-    console.log(`[PUSH] Found ${adminsSnap.size} admin account(s), ${tokens.length} with a registered push token.`);
-
     if (tokens.length === 0) {
-      console.log("[PUSH] No admin push tokens on file — nothing to send. An admin needs to open Admin Panel once to register.");
       return;
     }
 
@@ -321,8 +341,6 @@ exports.saveAdminPushToken = onCall(async (request) => {
     expoPushToken: expoPushToken,
   });
 
-  console.log(`[PUSH] Saved push token for admin ${request.auth.uid}: ${expoPushToken}`);
-
   return { success: true };
 });
 
@@ -339,7 +357,7 @@ exports.sendTestNotificationToMe = onCall(async (request) => {
   if (!token) {
     throw new HttpsError(
       "failed-precondition",
-      "No push token is saved for your account yet. Please close and reopen the Admin Panel screen to register one."
+      "No push token is saved for your account yet."
     );
   }
 
@@ -1514,8 +1532,6 @@ async function checkBEP20OnChainServer(address) {
     const rawBalance = await contract.balanceOf(address);
     const receivedAmount = Number(ethers.formatUnits(rawBalance, 18));
 
-    console.log(`[BEP20 CHECK] address=${address} onChainBalance=${receivedAmount}`);
-
     if (receivedAmount < 0.5) {
       return null;
     }
@@ -1529,11 +1545,8 @@ async function checkBEP20OnChainServer(address) {
       if (events.length > 0) {
         txId = events[events.length - 1].transactionHash;
       }
-    } catch (logError) {
-      console.log(`[BEP20 CHECK] Could not fetch transfer tx hash (non-fatal): ${logError.message}`);
-    }
+    } catch (logError) {}
 
-    console.log(`[BEP20 CHECK] Deposit confirmed for ${address}: amount=${receivedAmount} txId=${txId}`);
     return { amount: receivedAmount, txId: txId };
   } catch (error) {
     console.error("BEP20 on-chain check error:", error.message, error);
@@ -1555,25 +1568,20 @@ async function sweepBEP20Deposit(mnemonic, derivationIndex) {
   const gasReserve = ethers.parseEther("0.0008");
   const childBnbBalance = await provider.getBalance(childWallet.address);
 
-  console.log(`[SWEEP-BEP20] child=${childWallet.address} master=${masterWallet.address} childBnb=${childBnbBalance.toString()}`);
-
   if (childBnbBalance < gasReserve) {
     const fundTx = await masterWallet.sendTransaction({
       to: childWallet.address,
       value: gasReserve,
     });
     await fundTx.wait();
-    console.log(`[SWEEP-BEP20] Funded child with gas. tx=${fundTx.hash}`);
   }
 
   const usdtContract = new ethers.Contract(USDT_BSC_CONTRACT, ERC20_ABI, childWallet);
   const tokenBalance = await usdtContract.balanceOf(childWallet.address);
-  console.log(`[SWEEP-BEP20] childUsdtBalance=${tokenBalance.toString()}`);
 
   if (tokenBalance > 0n) {
     const sweepTx = await usdtContract.transfer(masterWallet.address, tokenBalance);
     await sweepTx.wait();
-    console.log(`[SWEEP-BEP20] Swept ${tokenBalance.toString()} to master. tx=${sweepTx.hash}`);
   }
 }
 
@@ -1596,22 +1604,17 @@ async function sweepTRC20Deposit(mnemonic, derivationIndex) {
   const childTrxBalance = await childTronWeb.trx.getBalance(childAddress);
   const feeReserveSun = 15000000;
 
-  console.log(`[SWEEP-TRC20] child=${childAddress} master=${masterAddress} childTrx=${childTrxBalance}`);
-
   if (childTrxBalance < feeReserveSun) {
     await masterTronWeb.trx.sendTransaction(childAddress, feeReserveSun);
-    console.log(`[SWEEP-TRC20] Funded child with TRX for fees.`);
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 
   const usdtContractAddress = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
   const contract = await childTronWeb.contract().at(usdtContractAddress);
   const balance = await contract.balanceOf(childAddress).call();
-  console.log(`[SWEEP-TRC20] childUsdtBalance=${balance.toString()}`);
 
   if (Number(balance) > 0) {
     await contract.transfer(masterAddress, balance).send({ from: childAddress });
-    console.log(`[SWEEP-TRC20] Swept ${balance.toString()} to master.`);
   }
 }
 
@@ -1621,18 +1624,13 @@ exports.checkPendingDeposits = onSchedule(
     const db = admin.firestore();
     const mnemonic = process.env.TRON_MNEMONIC;
 
-    console.log(`[SCHEDULER] Run started. mnemonicPresent=${!!mnemonic}`);
-
     const pendingSnap = await db.collection("depositAddresses").where("status", "==", "pending").get();
-    console.log(`[SCHEDULER] Found ${pendingSnap.size} pending deposit(s) to check.`);
     if (pendingSnap.empty) return;
 
     for (const docSnap of pendingSnap.docs) {
       const data = docSnap.data();
-      console.log(`[SCHEDULER] Checking deposit ${docSnap.id}: network=${data.network} address=${data.address} expected=${data.expectedAmount} derivationIndex=${data.derivationIndex}`);
 
       if (data.expiresAt && Date.now() > data.expiresAt) {
-        console.log(`[SCHEDULER] Deposit ${docSnap.id} has expired.`);
         await docSnap.ref.update({ status: "expired" });
         continue;
       }
@@ -1644,12 +1642,9 @@ exports.checkPendingDeposits = onSchedule(
         found = await checkBEP20OnChainServer(data.address);
       }
 
-      console.log(`[SCHEDULER] Result for ${docSnap.id}: ${found ? JSON.stringify(found) : "not found yet"}`);
-
       if (found) {
         try {
           await creditVerifiedDeposit(db, docSnap.ref, data.userId, found.amount, found.txId);
-          console.log(`[SCHEDULER] Successfully credited deposit ${docSnap.id}.`);
         } catch (creditError) {
           console.error(`[SCHEDULER] Failed to credit deposit ${docSnap.id}:`, creditError.message, creditError);
           continue;
@@ -1699,18 +1694,32 @@ exports.completeTask = onCall(async (request) => {
 
       let taskCount = Number(userData.taskCount || 0);
       let todayEarnings = Number(userData.todayEarnings || 0);
+      let dailyProfitSplits = Array.isArray(userData.dailyProfitSplits) ? userData.dailyProfitSplits : null;
 
       const lastTaskReset = userData.lastTaskReset ? userData.lastTaskReset.toDate() : null;
-      if (!lastTaskReset || lastTaskReset.getTime() < lastResetTime.getTime()) {
+      const isNewDay = !lastTaskReset || lastTaskReset.getTime() < lastResetTime.getTime();
+      if (isNewDay) {
         taskCount = 0;
         todayEarnings = 0;
+        dailyProfitSplits = null;
       }
 
       if (taskCount >= 5) {
         throw new HttpsError("resource-exhausted", "Daily task limit reached (5/5).");
       }
 
-      calculatedProfit = Number((currentBalance * rates.dailyTaskProfitRate).toFixed(2));
+      // On the first task of the day, lock in the day's total profit
+      // budget (balance at that moment x the configured rate) and split
+      // it into 5 randomized amounts that still sum to exactly that
+      // budget. Each of the 5 differently-priced "products" then shows a
+      // different profit for the rest of the day, without changing the
+      // total the user actually earns.
+      if (!dailyProfitSplits || dailyProfitSplits.length !== 5) {
+        const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate).toFixed(2));
+        dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
+      }
+
+      calculatedProfit = Number(dailyProfitSplits[taskCount]) || 0;
       let updatedBalance = Number((currentBalance + calculatedProfit).toFixed(2));
       const updatedTodayEarnings = Number((todayEarnings + calculatedProfit).toFixed(2));
       const updatedTotalEarnings = Number(((userData.totalEarnings || 0) + calculatedProfit).toFixed(2));
@@ -1765,6 +1774,7 @@ exports.completeTask = onCall(async (request) => {
         taskCount: updatedTaskCount,
         lastTaskReset: admin.firestore.FieldValue.serverTimestamp(),
         lastClaimedVipLevel: newClaimedVipId,
+        dailyProfitSplits: dailyProfitSplits,
       });
 
       const taskTaskRef = userRef.collection("tasks").doc();
