@@ -1846,7 +1846,7 @@ exports.completeTask = onCall(async (request) => {
       }
 
       if (!dailyProfitSplits || dailyProfitSplits.length !== 5) {
-        const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate).toFixed(2));
+        const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate * 5).toFixed(2));
         dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
       }
 
