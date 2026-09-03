@@ -36,6 +36,7 @@ import AdminWithdrawalsScreen from './src/screens/AdminWithdrawalsScreen';
 import AdminBonusConfigScreen from './src/screens/AdminBonusConfigScreen';
 import AdminUserManagementScreen from './src/screens/AdminUserManagementScreen';
 import PhoneVerifyScreen from './src/screens/PhoneVerifyScreen';
+import AdminRewardClaimsScreen from './src/screens/AdminRewardClaimsScreen';
 
 // Ensures a notification banner/sound appears even while the app is open
 // in the foreground (Expo's default is to suppress this unless a handler
@@ -261,6 +262,7 @@ export default function App() {
               <Stack.Screen name="AdminBonusConfigScreen" component={AdminBonusConfigScreen} />
               <Stack.Screen name="AdminUserManagementScreen" component={AdminUserManagementScreen} />
               <Stack.Screen name="PhoneVerify" component={PhoneVerifyScreen} />
+              <Stack.Screen name="AdminRewardClaimsScreen" component={AdminRewardClaimsScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
           </NavigationContainer>
         </ThemeProvider>
