@@ -62,6 +62,17 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [balanceReason, setBalanceReason] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [activeTab, setActiveTab] = useState('overview');
+  const [transactions, setTransactions] = useState([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [transactionsLoaded, setTransactionsLoaded] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [yearInput, setYearInput] = useState('');
+  const [monthInput, setMonthInput] = useState('');
+  const [monthResult, setMonthResult] = useState(null);
+  const [monthLoading, setMonthLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     const checkAccess = async () => {
       try {
@@ -107,6 +118,13 @@ export default function AdminUserManagementScreen({ navigation }) {
     setDetailLoading(true);
     setSelectedDetail(null);
     setBalanceReason('');
+    setActiveTab('overview');
+    setTransactions([]);
+    setTransactionsLoaded(false);
+    setHistoryFilter('all');
+    setMonthResult(null);
+    setYearInput('');
+    setMonthInput('');
     try {
       const detailFn = httpsCallable(functions, 'adminGetUserDetail');
       const res = await detailFn({ uid });
@@ -184,6 +202,76 @@ export default function AdminUserManagementScreen({ navigation }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleTabPress = (tabKey) => {
+    setActiveTab(tabKey);
+    if (tabKey === 'history' && !transactionsLoaded && selectedDetail) {
+      loadTransactions(selectedDetail.uid);
+    }
+  };
+
+  const loadTransactions = async (uid) => {
+    setTransactionsLoading(true);
+    try {
+      const txFn = httpsCallable(functions, 'adminGetUserTransactions');
+      const res = await txFn({ uid });
+      setTransactions(res.data.transactions || []);
+      setTransactionsLoaded(true);
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to load transaction history.');
+    } finally {
+      setTransactionsLoading(false);
+    }
+  };
+
+  const handleCheckMonth = async () => {
+    if (!selectedDetail) return;
+    const y = parseInt(yearInput, 10);
+    const m = parseInt(monthInput, 10);
+    if (isNaN(y) || isNaN(m) || m < 1 || m > 12) {
+      showAlert('Invalid Input', 'Enter a valid year (e.g. 2026) and month number (1-12).');
+      return;
+    }
+    setMonthLoading(true);
+    try {
+      const monthFn = httpsCallable(functions, 'adminGetUserJoiningsForMonth');
+      const res = await monthFn({ uid: selectedDetail.uid, year: y, month: m });
+      setMonthResult(res.data);
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to load joinings for that month.');
+    } finally {
+      setMonthLoading(false);
+    }
+  };
+
+  const handleDeleteUser = () => {
+    if (!selectedDetail) return;
+    showAlert(
+      'Delete This Account',
+      `This permanently deletes ${selectedDetail.username || 'this user'}'s account and all their data. This cannot be undone. Are you sure?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              const deleteFn = httpsCallable(functions, 'adminDeleteUser');
+              await deleteFn({ uid: selectedDetail.uid });
+              showAlert('Deleted', 'The account has been permanently removed.');
+              closeDetailModal();
+              handleSearch();
+            } catch (err) {
+              showAlert('Error', err.message || 'Failed to delete this account.');
+            } finally {
+              setDeleting(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const formatDate = (millis) => {
@@ -309,6 +397,21 @@ export default function AdminUserManagementScreen({ navigation }) {
               ) : selectedDetail ? (
                 <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
 
+                  <View style={currentStyles.tabRow}>
+                    {['overview', 'team', 'history'].map((tabKey) => (
+                      <TouchableOpacity
+                        key={tabKey}
+                        style={[styles.detailTabBtn, activeTab === tabKey && styles.detailTabBtnActive]}
+                        onPress={() => handleTabPress(tabKey)}
+                      >
+                        <Text style={[styles.detailTabText, activeTab === tabKey && styles.detailTabTextActive]}>
+                          {tabKey === 'overview' ? 'Overview' : tabKey === 'team' ? 'Team' : 'History'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {activeTab === 'overview' && (
                   <View style={currentStyles.infoBox}>
                     <View style={styles.infoRow}>
                       <Text style={styles.infoLabel}>Username</Text>
@@ -365,36 +468,98 @@ export default function AdminUserManagementScreen({ navigation }) {
                     )}
                   </View>
 
-                  <Text style={currentStyles.sectionLabel}>TEAM AND JOININGS</Text>
-                  <View style={currentStyles.infoBox}>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Direct Team</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.directTeamCount}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Indirect Team</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.indirectTeamSize}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Total Team Size</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.totalTeamSize}</Text>
-                    </View>
-                    <View style={currentStyles.teamDivider} />
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Today's Joinings</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.todayJoinings}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>This Week ({selectedDetail.weekLabel})</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.weekJoinings}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>This Month ({selectedDetail.monthLabel})</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.monthJoinings}</Text>
-                    </View>
-                    <Text style={styles.joiningNote}>These joining counts reflect only this user's direct referrals.</Text>
                   </View>
+                  )}
 
+                  {activeTab === 'team' && (
+                  <View>
+                    <View style={currentStyles.infoBox}>
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Direct Team</Text>
+                        <Text style={currentStyles.infoValue}>{selectedDetail.directTeamCount}</Text>
+                      </View>
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Indirect Team</Text>
+                        <Text style={currentStyles.infoValue}>{selectedDetail.indirectTeamSize}</Text>
+                      </View>
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Total Team Size</Text>
+                        <Text style={currentStyles.infoValue}>{selectedDetail.totalTeamSize}</Text>
+                      </View>
+                      <View style={currentStyles.teamDivider} />
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Today's Joinings</Text>
+                        <Text style={currentStyles.infoValue}>{selectedDetail.todayJoinings}</Text>
+                      </View>
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>This Week ({selectedDetail.weekLabel})</Text>
+                        <Text style={currentStyles.infoValue}>{selectedDetail.weekJoinings}</Text>
+                      </View>
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>This Month ({selectedDetail.monthLabel})</Text>
+                        <Text style={currentStyles.infoValue}>{selectedDetail.monthJoinings}</Text>
+                      </View>
+                    </View>
+
+                    <Text style={currentStyles.sectionLabel}>ACTIVE DIRECT MEMBERS ({(selectedDetail.activeMembers || []).length})</Text>
+                    <View style={currentStyles.infoBox}>
+                      {(selectedDetail.activeMembers || []).length > 0 ? (
+                        selectedDetail.activeMembers.map((name, idx) => (
+                          <Text key={idx} style={currentStyles.infoValue}>{name}</Text>
+                        ))
+                      ) : (
+                        <Text style={styles.joiningNote}>None yet.</Text>
+                      )}
+                    </View>
+
+                    <Text style={currentStyles.sectionLabel}>INACTIVE DIRECT MEMBERS ({(selectedDetail.inactiveMembers || []).length})</Text>
+                    <View style={currentStyles.infoBox}>
+                      {(selectedDetail.inactiveMembers || []).length > 0 ? (
+                        selectedDetail.inactiveMembers.map((name, idx) => (
+                          <Text key={idx} style={currentStyles.infoValue}>{name}</Text>
+                        ))
+                      ) : (
+                        <Text style={styles.joiningNote}>None.</Text>
+                      )}
+                    </View>
+
+                    <Text style={currentStyles.sectionLabel}>CHECK A PAST MONTH</Text>
+                    <View style={currentStyles.infoBox}>
+                      <View style={styles.monthPickerRow}>
+                        <TextInput
+                          style={[currentStyles.editInput, styles.monthInputSmall, { marginBottom: 0 }]}
+                          value={yearInput}
+                          onChangeText={(t) => setYearInput(t.replace(/[^0-9]/g, ''))}
+                          keyboardType="number-pad"
+                          placeholder="Year e.g. 2026"
+                          placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                        />
+                        <TextInput
+                          style={[currentStyles.editInput, styles.monthInputSmall, { marginBottom: 0 }]}
+                          value={monthInput}
+                          onChangeText={(t) => setMonthInput(t.replace(/[^0-9]/g, ''))}
+                          keyboardType="number-pad"
+                          placeholder="Month 1-12"
+                          placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                        />
+                        <TouchableOpacity style={styles.checkMonthBtn} onPress={handleCheckMonth} disabled={monthLoading}>
+                          {monthLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.checkMonthBtnText}>Check</Text>}
+                        </TouchableOpacity>
+                      </View>
+                      {monthResult && (
+                        <View style={{ marginTop: 10 }}>
+                          <Text style={styles.joiningNote}>{monthResult.monthLabel}: {monthResult.count} joining(s)</Text>
+                          {monthResult.members.map((m, idx) => (
+                            <Text key={idx} style={currentStyles.infoValue}>{m.username} {m.isActive ? '(active)' : '(inactive)'}</Text>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  )}
+
+                  {activeTab === 'overview' && (
+                  <View style={currentStyles.infoBox}>
                   <Text style={currentStyles.sectionLabel}>EDITABLE FIELDS</Text>
 
                   <Text style={styles.fieldLabel}>Email Address</Text>
@@ -459,6 +624,62 @@ export default function AdminUserManagementScreen({ navigation }) {
                     {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
                   </TouchableOpacity>
 
+                  <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteUser} disabled={deleting}>
+                    {deleting ? <ActivityIndicator color="#EF4444" /> : <Text style={styles.deleteBtnText}>Delete This Account</Text>}
+                  </TouchableOpacity>
+                  </View>
+                  )}
+
+                  {activeTab === 'history' && (
+                  <View>
+                    <View style={styles.txFilterRow}>
+                      {['all', 'credit', 'debit'].map((f) => (
+                        <TouchableOpacity
+                          key={f}
+                          style={[styles.txFilterBtn, historyFilter === f && styles.txFilterBtnActive]}
+                          onPress={() => setHistoryFilter(f)}
+                        >
+                          <Text style={[styles.detailTabText, historyFilter === f && styles.detailTabTextActive]}>
+                            {f === 'all' ? 'All' : f === 'credit' ? 'Credited' : 'Debited'}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {transactionsLoading ? (
+                      <View style={styles.detailLoaderBox}>
+                        <ActivityIndicator size="large" color="#2563EB" />
+                      </View>
+                    ) : (
+                      (() => {
+                        const filtered = transactions.filter((t) => {
+                          if (historyFilter === 'all') return true;
+                          const isCredit = t.isCredit !== false;
+                          return historyFilter === 'credit' ? isCredit : !isCredit;
+                        });
+                        if (filtered.length === 0) {
+                          return <Text style={styles.joiningNote}>No transactions found.</Text>;
+                        }
+                        return filtered.map((t, idx) => {
+                          const isCredit = t.isCredit !== false;
+                          return (
+                            <View key={idx} style={currentStyles.infoBox}>
+                              <View style={styles.infoRow}>
+                                <Text style={currentStyles.infoValue}>{t.title}</Text>
+                                <Text style={[styles.txAmount, { color: isCredit ? '#10B981' : '#EF4444' }]}>
+                                  {isCredit ? '+' : '-'}${Number(t.amount).toFixed(2)}
+                                </Text>
+                              </View>
+                              <Text style={styles.joiningNote}>{t.date ? formatDate(t.date) : 'Date unknown'}</Text>
+                              {t.reason && <Text style={styles.joiningNote}>Reason: {t.reason}</Text>}
+                            </View>
+                          );
+                        });
+                      })()
+                    )}
+                  </View>
+                  )}
+
                 </ScrollView>
               ) : null}
             </View>
@@ -484,7 +705,8 @@ const lightStyles = StyleSheet.create({
   infoValue: { fontSize: 12, fontWeight: '700', color: '#334155', maxWidth: '60%', textAlign: 'right' },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 10 },
   editInput: { backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, color: '#1E293B', fontSize: 13, marginBottom: 14 },
-  teamDivider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 4 }
+  teamDivider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 4 },
+  tabRow: { flexDirection: 'row', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 4, marginBottom: 14, gap: 4 }
 });
 
 const darkStyles = StyleSheet.create({
@@ -502,7 +724,8 @@ const darkStyles = StyleSheet.create({
   infoValue: { fontSize: 12, fontWeight: '700', color: '#E2E8F0', maxWidth: '60%', textAlign: 'right' },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 10 },
   editInput: { backgroundColor: '#0D1117', borderRadius: 10, borderWidth: 1, borderColor: '#21262D', padding: 12, color: '#FFFFFF', fontSize: 13, marginBottom: 14 },
-  teamDivider: { height: 1, backgroundColor: '#21262D', marginVertical: 4 }
+  teamDivider: { height: 1, backgroundColor: '#21262D', marginVertical: 4 },
+  tabRow: { flexDirection: 'row', backgroundColor: '#0D1117', borderRadius: 12, padding: 4, marginBottom: 14, gap: 4 }
 });
 
 const styles = StyleSheet.create({
@@ -529,5 +752,19 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: '#3B82F6', height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   saveBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   accessDeniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 40 },
-  accessDeniedText: { fontSize: 13, color: '#94A3B8', fontWeight: '500', textAlign: 'center' }
+  accessDeniedText: { fontSize: 13, color: '#94A3B8', fontWeight: '500', textAlign: 'center' },
+  detailTabBtn: { flex: 1, height: 34, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
+  detailTabBtnActive: { backgroundColor: 'rgba(59,130,246,0.15)' },
+  detailTabText: { fontSize: 11, fontWeight: '700', color: '#94A3B8' },
+  detailTabTextActive: { color: '#3B82F6' },
+  monthPickerRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  monthInputSmall: { flex: 1 },
+  checkMonthBtn: { backgroundColor: '#3B82F6', height: 44, paddingHorizontal: 14, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  checkMonthBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  txFilterRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  txFilterBtn: { flex: 1, height: 34, borderRadius: 9, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(148,163,184,0.12)' },
+  txFilterBtnActive: { backgroundColor: 'rgba(59,130,246,0.15)' },
+  txAmount: { fontSize: 12, fontWeight: '800' },
+  deleteBtn: { height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.08)' },
+  deleteBtnText: { color: '#EF4444', fontSize: 14, fontWeight: '700' }
 });
