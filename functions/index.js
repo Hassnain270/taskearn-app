@@ -118,9 +118,9 @@ ACCOUNT UNIQUENESS AND USERNAME RULES:
 Each email address, phone number, and cryptocurrency wallet address can only ever be linked to exactly one TaskEarn account at a time, both during registration and for any later change made from the Security or Wallet Configuration screens.
 A username is chosen once, during registration, and can never be changed afterward under any circumstance — there is no option anywhere in the app to change an existing username later. During registration itself, the chosen username is also checked against all existing accounts, and if it is already taken, the user is asked to choose a different one before they can continue.
 
-TRANSACTION HISTORY: Home -> History. Shows Deposits, Withdrawals, Welcome Bonus, Direct Referral Bonus, Indirect Referral Bonus, VIP Upgrade Bonus, Task Commission, and any manual balance adjustment made by an administrator, which always includes a stated reason.
+TRANSACTION HISTORY: Home -> History. Shows Deposits, Withdrawals, Welcome Bonus, Direct Referral Bonus, Indirect Referral Bonus, VIP Upgrade Bonus, Task Commission, Monthly Rewards, and any manual balance adjustment made by an administrator, which always includes a stated reason.
 
-TEAM AND REFERRALS: TEAM tab shows the user's own team size, joinings, and their own direct members (their downline) — it does not show who referred the user themselves. Get your referral link: Home -> Invitation, which displays only the user's own referral code and link for sharing with others.
+TEAM AND REFERRALS: TEAM tab shows the user's own team size, joinings, and their own direct members (their downline), split into active members (who have made a deposit) and inactive members (registered but not yet deposited) — it does not show who referred the user themselves. Get your referral link: Home -> Invitation, which displays only the user's own referral code and link for sharing with others.
 Direct and indirect referral bonuses are ONE-TIME bonuses, not an ongoing share of a referred member's income. When a Level 1 (direct) referred member makes a deposit that activates a VIP capital tier, their referrer receives a one-time bonus equal to ${directPct} percent of that VIP capital amount. If that direct member was themselves referred by someone else, that second-level (indirect) referrer also receives a one-time bonus of ${indirectPct} percent of the same VIP capital amount, at that same moment. Both bonuses are paid once, at the moment of that specific deposit-triggered VIP activation — they are never a recurring percentage of the referred member's daily task earnings or any of their future income, and they have no ongoing connection to how much that member goes on to earn afterward.
 
 WALLET CONFIGURATION: Me -> Wallet Configuration. TRC20 addresses start with 'T' and are 34 characters long; BEP20 addresses start with '0x' and are 42 characters long.
@@ -154,6 +154,11 @@ const DEFAULT_BONUS_RATES = {
   dailyTaskProfitRate: 0.0032,
 };
 
+const DEFAULT_MONTHLY_REWARD_CONFIG = {
+  directReferralThreshold: 15,
+  rewardAmount: 50,
+};
+
 async function getBonusRates(db) {
   try {
     const snap = await db.collection("config").doc("bonusRates").get();
@@ -171,6 +176,22 @@ async function getBonusRates(db) {
     console.error("Error reading bonus config, using defaults:", e);
   }
   return DEFAULT_BONUS_RATES;
+}
+
+async function getMonthlyRewardConfigInternal(db) {
+  try {
+    const snap = await db.collection("config").doc("monthlyReward").get();
+    if (snap.exists) {
+      const data = snap.data();
+      return {
+        directReferralThreshold: typeof data.directReferralThreshold === "number" ? data.directReferralThreshold : DEFAULT_MONTHLY_REWARD_CONFIG.directReferralThreshold,
+        rewardAmount: typeof data.rewardAmount === "number" ? data.rewardAmount : DEFAULT_MONTHLY_REWARD_CONFIG.rewardAmount,
+      };
+    }
+  } catch (e) {
+    console.error("Error reading monthly reward config, using defaults:", e);
+  }
+  return DEFAULT_MONTHLY_REWARD_CONFIG;
 }
 
 function calculateVipLockedCapital(balance) {
@@ -239,11 +260,22 @@ function getPktResetBoundaries() {
   return { dayResetUtcMs, weekResetUtcMs, weekLabel, monthResetUtcMs, monthLabel };
 }
 
+function getMonthBoundariesForYearMonth(year, month) {
+  const startPkt = new Date(Date.UTC(year, month - 1, 1, 21, 0, 0));
+  const endPkt = new Date(Date.UTC(year, month, 1, 21, 0, 0));
+  const startUtcMs = startPkt.getTime() - 5 * 3600000;
+  const endUtcMs = endPkt.getTime() - 5 * 3600000;
+  const monthAbbr = MONTH_ABBR[month - 1];
+  const lastDate = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const label = `01 ${monthAbbr} - ${String(lastDate).padStart(2, "0")} ${monthAbbr}, ${year}`;
+  return { startUtcMs, endUtcMs, label };
+}
+
 function getEffectiveTaskCount(userData) {
   const now = new Date();
   let lastResetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 16, 0, 0));
   if (now.getTime() < lastResetTime.getTime()) {
-    lastResetTime.setDate(lastResetTime.getDate() - 1);
+    lastResetTime.setUTCDate(lastResetTime.getUTCDate() - 1);
   }
 
   const storedTaskCount = Number(userData.taskCount || 0);
@@ -255,12 +287,6 @@ function getEffectiveTaskCount(userData) {
   return storedTaskCount;
 }
 
-// Splits a total amount into `count` randomized positive parts that sum
-// to EXACTLY that total (to the cent) — used so each of the day's 5
-// tasks shows a different profit amount while the day's overall total
-// stays precisely equal to what the configured daily rate produces.
-// Weights are kept within a moderate range (0.6x-1.4x of an even share)
-// so no single task looks implausibly large or near-zero.
 function generateRandomSplits(total, count) {
   if (total <= 0) return new Array(count).fill(0);
 
@@ -278,6 +304,15 @@ function generateRandomSplits(total, count) {
   return splits;
 }
 
+async function countActiveDirectReferrals(db, uid) {
+  const snap = await db.collection("users").where("referredByUid", "==", uid).get();
+  let count = 0;
+  snap.forEach((d) => {
+    if (d.data().hasDeposited === true) count++;
+  });
+  return count;
+}
+
 async function sendExpoPushMessages(messages) {
   const response = await fetch("https://exp.host/--/api/v2/push/send", {
     method: "POST",
@@ -290,7 +325,6 @@ async function sendExpoPushMessages(messages) {
   });
 
   const result = await response.json();
-  console.log("[PUSH] Expo push service response:", JSON.stringify(result));
   return result;
 }
 
@@ -305,9 +339,7 @@ async function notifyAdminsOfNewWithdrawal(db, args) {
       if (token) tokens.push(token);
     });
 
-    if (tokens.length === 0) {
-      return;
-    }
+    if (tokens.length === 0) return;
 
     const messages = tokens.map((token) => ({
       to: token,
@@ -562,6 +594,7 @@ exports.calculateTeamStats = onCall(async (request) => {
         id: d.id,
         username: d.username || (d.email ? d.email.split("@")[0] : "Member"),
         totalSubTeam: subTreeCount,
+        isActive: d.hasDeposited === true,
       };
     });
 
@@ -692,6 +725,9 @@ exports.adminGetUserDetail = onCall(async (request) => {
     if (t >= monthResetUtcMs) monthJoinings++;
   });
 
+  const activeMembers = directMembers.filter((m) => m.hasDeposited === true).map((m) => m.username || m.id);
+  const inactiveMembers = directMembers.filter((m) => m.hasDeposited !== true).map((m) => m.username || m.id);
+
   const depositTxSnap = await db.collection("transactions")
     .where("userId", "==", uid)
     .where("type", "==", "DEPOSIT")
@@ -735,6 +771,8 @@ exports.adminGetUserDetail = onCall(async (request) => {
       directTeamCount: directTeamCount,
       indirectTeamSize: indirectTeamSize,
       totalTeamSize: totalTeamSize,
+      activeMembers: activeMembers,
+      inactiveMembers: inactiveMembers,
       todayJoinings: todayJoinings,
       weekJoinings: weekJoinings,
       weekLabel: weekLabel,
@@ -744,6 +782,104 @@ exports.adminGetUserDetail = onCall(async (request) => {
       isAdmin: userData.isAdmin === true,
     },
   };
+});
+
+exports.adminGetUserJoiningsForMonth = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const data = request.data || {};
+  const uid = data.uid;
+  const year = Number(data.year);
+  const month = Number(data.month);
+  if (!uid || !year || !month) throw new HttpsError("invalid-argument", "uid, year, and month are required.");
+
+  const boundaries = getMonthBoundariesForYearMonth(year, month);
+  const directSnap = await db.collection("users").where("referredByUid", "==", uid).get();
+  const members = [];
+  directSnap.forEach((d) => {
+    const t = getMemberTimestamp(d.data().createdAt);
+    if (t >= boundaries.startUtcMs && t < boundaries.endUtcMs) {
+      members.push({
+        username: d.data().username || d.id,
+        isActive: d.data().hasDeposited === true,
+      });
+    }
+  });
+
+  return { success: true, monthLabel: boundaries.label, count: members.length, members: members };
+});
+
+exports.adminGetUserTransactions = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const uid = request.data && request.data.uid;
+  if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
+
+  const snap = await db.collection("transactions").where("userId", "==", uid).get();
+  const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : null;
+
+  const txs = snap.docs.map((d) => {
+    const t = d.data();
+    return {
+      type: t.type || null,
+      amount: Number(t.amount || 0),
+      isCredit: t.isCredit,
+      title: t.title || t.type || "Transaction",
+      status: t.status || null,
+      reason: t.reason || null,
+      date: toMillis(t.createdAt),
+    };
+  }).sort((a, b) => (b.date || 0) - (a.date || 0));
+
+  return { success: true, transactions: txs };
+});
+
+exports.adminDeleteUser = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may delete user accounts.");
+  }
+
+  const uid = request.data && request.data.uid;
+  if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
+  if (uid === request.auth.uid) {
+    throw new HttpsError("invalid-argument", "You cannot delete your own administrator account.");
+  }
+
+  const userRef = db.collection("users").doc(uid);
+  const userDoc = await userRef.get();
+  if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+
+  for (const sub of ["tasks", "bonuses"]) {
+    const subSnap = await userRef.collection(sub).get();
+    if (!subSnap.empty) {
+      const batch = db.batch();
+      subSnap.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  }
+
+  await userRef.delete();
+
+  try {
+    await admin.auth().deleteUser(uid);
+  } catch (authErr) {
+    console.error(`Failed to delete Firebase Auth account for ${uid} (Firestore doc already removed):`, authErr.message);
+  }
+
+  return { success: true };
 });
 
 exports.adminUpdateUserData = onCall(async (request) => {
@@ -1674,6 +1810,7 @@ exports.completeTask = onCall(async (request) => {
 
   try {
     let calculatedProfit = 0;
+    let debugInfo = {};
 
     await db.runTransaction(async (transaction) => {
       const userDoc = await transaction.get(userRef);
@@ -1689,7 +1826,7 @@ exports.completeTask = onCall(async (request) => {
       const now = new Date();
       let lastResetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 16, 0, 0));
       if (now.getTime() < lastResetTime.getTime()) {
-        lastResetTime.setDate(lastResetTime.getDate() - 1);
+        lastResetTime.setUTCDate(lastResetTime.getUTCDate() - 1);
       }
 
       let taskCount = Number(userData.taskCount || 0);
@@ -1708,12 +1845,6 @@ exports.completeTask = onCall(async (request) => {
         throw new HttpsError("resource-exhausted", "Daily task limit reached (5/5).");
       }
 
-      // On the first task of the day, lock in the day's total profit
-      // budget (balance at that moment x the configured rate) and split
-      // it into 5 randomized amounts that still sum to exactly that
-      // budget. Each of the 5 differently-priced "products" then shows a
-      // different profit for the rest of the day, without changing the
-      // total the user actually earns.
       if (!dailyProfitSplits || dailyProfitSplits.length !== 5) {
         const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate).toFixed(2));
         dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
@@ -1724,6 +1855,13 @@ exports.completeTask = onCall(async (request) => {
       const updatedTodayEarnings = Number((todayEarnings + calculatedProfit).toFixed(2));
       const updatedTotalEarnings = Number(((userData.totalEarnings || 0) + calculatedProfit).toFixed(2));
       const updatedTaskCount = taskCount + 1;
+
+      debugInfo = {
+        taskCountBefore: taskCount,
+        isNewDay: isNewDay,
+        todayEarningsBefore: todayEarnings,
+        updatedTodayEarnings: updatedTodayEarnings,
+      };
 
       const previousVipId = Number(userData.lastClaimedVipLevel || 0);
       const currentTier = getVipTierByBalance(updatedBalance);
@@ -1785,6 +1923,8 @@ exports.completeTask = onCall(async (request) => {
         orderId: (request.data && request.data.orderId) || taskTaskRef.id.substring(0, 8).toUpperCase(),
       });
     });
+
+    console.log("[completeTask] debug:", JSON.stringify(debugInfo));
 
     return { success: true, profit: calculatedProfit };
   } catch (error) {
@@ -2085,6 +2225,242 @@ exports.updateBonusConfig = onCall(async (request) => {
 
   const newRates = await getBonusRates(db);
   return { success: true, rates: newRates };
+});
+
+exports.getActivePromotion = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const snap = await db.collection("config").doc("promotion").get();
+  if (!snap.exists) return { active: false };
+  const data = snap.data();
+  if (data.active !== true) return { active: false };
+
+  const now = Date.now();
+  const start = Number(data.startDate) || 0;
+  const end = Number(data.endDate) || 0;
+  if (now < start || now > end) return { active: false };
+
+  return {
+    active: true,
+    title: data.title || "",
+    message: data.message || "",
+    startDate: start,
+    endDate: end,
+  };
+});
+
+exports.updatePromotionConfig = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may update the promotion.");
+  }
+
+  const data = request.data || {};
+  const updates = {
+    active: data.active === true,
+    title: typeof data.title === "string" ? data.title.trim() : "",
+    message: typeof data.message === "string" ? data.message.trim() : "",
+    startDate: Number(data.startDate) || 0,
+    endDate: Number(data.endDate) || 0,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: request.auth.uid,
+  };
+
+  if (updates.active && (!updates.title || !updates.message || !updates.startDate || !updates.endDate)) {
+    throw new HttpsError("invalid-argument", "Title, message, start date, and end date are all required to activate a promotion.");
+  }
+
+  await db.collection("config").doc("promotion").set(updates, { merge: true });
+  return { success: true };
+});
+
+exports.getMonthlyRewardStatus = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const config = await getMonthlyRewardConfigInternal(db);
+  const activeCount = await countActiveDirectReferrals(db, request.auth.uid);
+
+  const pendingSnap = await db.collection("rewardClaims")
+    .where("userId", "==", request.auth.uid)
+    .where("status", "==", "pending")
+    .limit(1)
+    .get();
+
+  return {
+    success: true,
+    threshold: config.directReferralThreshold,
+    rewardAmount: config.rewardAmount,
+    activeDirectCount: activeCount,
+    eligible: activeCount >= config.directReferralThreshold,
+    hasPendingClaim: !pendingSnap.empty,
+  };
+});
+
+exports.updateMonthlyRewardConfig = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may update this configuration.");
+  }
+  const data = request.data || {};
+  const updates = {};
+  if (typeof data.directReferralThreshold === "number" && data.directReferralThreshold > 0) {
+    updates.directReferralThreshold = data.directReferralThreshold;
+  }
+  if (typeof data.rewardAmount === "number" && data.rewardAmount >= 0) {
+    updates.rewardAmount = data.rewardAmount;
+  }
+  if (Object.keys(updates).length === 0) {
+    throw new HttpsError("invalid-argument", "No valid fields were provided.");
+  }
+  updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+  updates.updatedBy = request.auth.uid;
+  await db.collection("config").doc("monthlyReward").set(updates, { merge: true });
+  const newConfig = await getMonthlyRewardConfigInternal(db);
+  return { success: true, config: newConfig };
+});
+
+exports.claimMonthlyReward = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const userId = request.auth.uid;
+  const db = admin.firestore();
+
+  const userDoc = await db.collection("users").doc(userId).get();
+  if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+  const userData = userDoc.data();
+
+  const config = await getMonthlyRewardConfigInternal(db);
+  const activeCount = await countActiveDirectReferrals(db, userId);
+
+  if (activeCount < config.directReferralThreshold) {
+    throw new HttpsError("failed-precondition", `You need at least ${config.directReferralThreshold} active direct referrals to claim this reward.`);
+  }
+
+  const pendingSnap = await db.collection("rewardClaims")
+    .where("userId", "==", userId)
+    .where("status", "==", "pending")
+    .limit(1)
+    .get();
+  if (!pendingSnap.empty) {
+    throw new HttpsError("already-exists", "You already have a pending reward claim.");
+  }
+
+  const claimRef = db.collection("rewardClaims").doc();
+  await claimRef.set({
+    claimId: claimRef.id,
+    userId: userId,
+    username: userData.username || userData.email || "User",
+    activeDirectCount: activeCount,
+    threshold: config.directReferralThreshold,
+    rewardAmount: config.rewardAmount,
+    status: "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { success: true, message: "Your reward claim has been submitted for review." };
+});
+
+exports.adminGetRewardClaims = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view reward claims.");
+  }
+
+  const status = (request.data && request.data.status) || "pending";
+  const snap = await db.collection("rewardClaims").where("status", "==", status).get();
+  const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : null;
+
+  const claims = snap.docs.map((d) => {
+    const c = d.data();
+    return {
+      claimId: c.claimId || d.id,
+      userId: c.userId,
+      username: c.username,
+      activeDirectCount: c.activeDirectCount,
+      threshold: c.threshold,
+      rewardAmount: c.rewardAmount,
+      status: c.status,
+      createdAt: toMillis(c.createdAt),
+    };
+  }).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  return { success: true, claims: claims };
+});
+
+exports.adminUpdateRewardClaimStatus = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminUid = request.auth.uid;
+  const adminDoc = await db.collection("users").doc(adminUid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may process reward claims.");
+  }
+
+  const data = request.data || {};
+  const claimId = data.claimId;
+  const newStatus = data.newStatus;
+  if (!claimId || !["approved", "rejected"].includes(newStatus)) {
+    throw new HttpsError("invalid-argument", "A valid claimId and newStatus ('approved' or 'rejected') are required.");
+  }
+
+  const claimRef = db.collection("rewardClaims").doc(claimId);
+
+  await db.runTransaction(async (transaction) => {
+    const claimDoc = await transaction.get(claimRef);
+    if (!claimDoc.exists) throw new HttpsError("not-found", "Reward claim not found.");
+    const claimData = claimDoc.data();
+    if (claimData.status !== "pending") {
+      throw new HttpsError("failed-precondition", "This claim has already been processed.");
+    }
+
+    if (newStatus === "approved") {
+      const userRef = db.collection("users").doc(claimData.userId);
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) throw new HttpsError("not-found", "The user for this claim no longer exists.");
+
+      const userData = userDoc.data();
+      const currentBalance = Number(userData.balance || userData.totalBalance || 0);
+      const rewardAmount = Number(claimData.rewardAmount || 0);
+      const newBalance = Number((currentBalance + rewardAmount).toFixed(2));
+
+      transaction.update(userRef, {
+        balance: newBalance,
+        totalBalance: newBalance,
+      });
+
+      const rewardTxRef = db.collection("transactions").doc();
+      transaction.set(rewardTxRef, {
+        transactionId: rewardTxRef.id,
+        userId: claimData.userId,
+        type: "MONTHLY_REWARD",
+        amount: rewardAmount,
+        status: "approved",
+        isCredit: true,
+        title: `Monthly Reward (${claimData.activeDirectCount} active referrals)`,
+        claimId: claimId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      transaction.update(claimRef, {
+        status: "approved",
+        processedBy: adminUid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } else {
+      transaction.update(claimRef, {
+        status: "rejected",
+        processedBy: adminUid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  });
+
+  return { success: true };
 });
 
 const GROQ_MODEL_CHAIN = [
