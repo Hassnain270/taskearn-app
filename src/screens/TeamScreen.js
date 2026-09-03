@@ -32,6 +32,10 @@ export default function TeamScreen({ navigation, route }) {
   const [monthlyJoinings, setMonthlyJoinings] = useState(0);
   const [monthLabel, setMonthLabel] = useState("");
 
+  // Which of the two direct-member tabs is currently shown. Defaults to
+  // "active" since those are the members most relevant to check first.
+  const [selectedTab, setSelectedTab] = useState('active');
+
   useEffect(() => {
     const fetchTeamStats = async () => {
       try {
@@ -61,6 +65,16 @@ export default function TeamScreen({ navigation, route }) {
   }, []);
 
   const directMembersCount = directMembersData.length;
+
+  // Splits the user's own direct referrals into two groups based on the
+  // backend's isActive flag (true only once that member has made a
+  // deposit). This lets a user immediately see which of their referrals
+  // are genuinely working the platform versus which ones registered but
+  // never followed through, so they know who to reach out to.
+  const activeMembers = directMembersData.filter((m) => m.isActive === true);
+  const inactiveMembers = directMembersData.filter((m) => m.isActive !== true);
+  const displayedMembers = selectedTab === 'active' ? activeMembers : inactiveMembers;
+
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
   const passState = {
@@ -168,17 +182,48 @@ export default function TeamScreen({ navigation, route }) {
         </View>
 
         <View style={styles.listHeaderRow}>
-          <Text style={currentStyles.listTitle}>Direct Active Members</Text>
+          <Text style={currentStyles.listTitle}>Direct Members</Text>
           <Text style={currentStyles.listSubTitle}>Monitors Sub-Teams</Text>
         </View>
 
-        {directMembersData.length === 0 ? (
+        <View style={currentStyles.tabRow}>
+          <TouchableOpacity
+            style={[styles.tabButton, selectedTab === 'active' && styles.tabButtonActive]}
+            onPress={() => setSelectedTab('active')}
+          >
+            <View style={[styles.tabDot, { backgroundColor: '#22C55E' }]} />
+            <Text style={[currentStyles.tabButtonText, selectedTab === 'active' && styles.tabButtonTextActive]}>
+              Active ({activeMembers.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, selectedTab === 'inactive' && styles.tabButtonActive]}
+            onPress={() => setSelectedTab('inactive')}
+          >
+            <View style={[styles.tabDot, { backgroundColor: '#94A3B8' }]} />
+            <Text style={[currentStyles.tabButtonText, selectedTab === 'inactive' && styles.tabButtonTextActive]}>
+              Inactive ({inactiveMembers.length})
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {selectedTab === 'inactive' && inactiveMembers.length > 0 && (
+          <Text style={currentStyles.inactiveNote}>
+            These direct members have registered but haven't made a deposit yet. You may want to check in with them.
+          </Text>
+        )}
+
+        {displayedMembers.length === 0 ? (
           <View style={currentStyles.emptyCard}>
-            <Text style={styles.emptyText}>No direct active team members yet.</Text>
+            <Text style={styles.emptyText}>
+              {selectedTab === 'active'
+                ? 'No active direct members yet.'
+                : 'No inactive direct members — everyone you referred has deposited.'}
+            </Text>
           </View>
         ) : (
           <FlatList
-            data={directMembersData}
+            data={displayedMembers}
             renderItem={renderMemberItem}
             keyExtractor={item => item.id}
             scrollEnabled={false}
@@ -228,7 +273,10 @@ const lightStyles = StyleSheet.create({
   memberUsername: { fontSize: 13, fontWeight: 'bold', color: '#334155', marginLeft: 10 },
   teamCountLabel: { fontSize: 12, color: '#64748B', fontWeight: '500' },
   emptyCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F1F5F9' },
-  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0' }
+  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#E2E8F0' },
+  tabRow: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 4, marginBottom: 14, borderWidth: 1, borderColor: '#F1F5F9', gap: 4 },
+  tabButtonText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
+  inactiveNote: { fontSize: 11, color: '#92400E', backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 10, padding: 10, marginBottom: 12, lineHeight: 15, fontWeight: '500' }
 });
 
 const darkStyles = StyleSheet.create({
@@ -245,7 +293,10 @@ const darkStyles = StyleSheet.create({
   memberUsername: { fontSize: 13, fontWeight: 'bold', color: '#E2E8F0', marginLeft: 10 },
   teamCountLabel: { fontSize: 12, color: '#94A3B8', fontWeight: '500' },
   emptyCard: { backgroundColor: '#161B22', borderRadius: 14, padding: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#21262D' },
-  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D' }
+  bottomTabNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#161B22', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#21262D' },
+  tabRow: { flexDirection: 'row', backgroundColor: '#161B22', borderRadius: 14, padding: 4, marginBottom: 14, borderWidth: 1, borderColor: '#21262D', gap: 4 },
+  tabButtonText: { fontSize: 12, fontWeight: '700', color: '#94A3B8' },
+  inactiveNote: { fontSize: 11, color: '#FDE68A', backgroundColor: '#2A1F05', borderWidth: 1, borderColor: '#92400E', borderRadius: 10, padding: 10, marginBottom: 12, lineHeight: 15, fontWeight: '500' }
 });
 
 const styles = StyleSheet.create({
@@ -272,7 +323,11 @@ const styles = StyleSheet.create({
   avatarBox: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(59, 130, 246, 0.1)', justifyContent: 'center', alignItems: 'center' },
   memberRight: { flexDirection: 'row', alignItems: 'center' },
   teamCountValue: { fontSize: 13, fontWeight: 'bold', color: '#22C55E' },
-  emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500' },
+  emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500', textAlign: 'center' },
   tabItem: { alignItems: 'center', justifyContent: 'center' },
-  tabText: { fontSize: 9, fontWeight: '700', color: '#94A3B8', marginTop: 3 }
+  tabText: { fontSize: 9, fontWeight: '700', color: '#94A3B8', marginTop: 3 },
+  tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 38, borderRadius: 10, gap: 6 },
+  tabButtonActive: { backgroundColor: 'rgba(59, 130, 246, 0.12)' },
+  tabButtonTextActive: { color: '#3B82F6' },
+  tabDot: { width: 7, height: 7, borderRadius: 3.5 }
 });
