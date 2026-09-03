@@ -1844,22 +1844,24 @@ exports.completeTask = onCall(async (request) => {
       let taskCount = Number(userData.taskCount || 0);
       let todayEarnings = Number(userData.todayEarnings || 0);
       let dailyProfitSplits = Array.isArray(userData.dailyProfitSplits) ? userData.dailyProfitSplits : null;
+      let splitsBoundary = userData.dailyProfitSplitsBoundary;
+      const dayBoundaryMs = lastResetTime.getTime();
 
       const lastTaskReset = userData.lastTaskReset ? userData.lastTaskReset.toDate() : null;
       const isNewDay = !lastTaskReset || lastTaskReset.getTime() < lastResetTime.getTime();
       if (isNewDay) {
         taskCount = 0;
         todayEarnings = 0;
-        dailyProfitSplits = null;
       }
 
       if (taskCount >= 5) {
         throw new HttpsError("resource-exhausted", "Daily task limit reached (5/5).");
       }
 
-      if (!dailyProfitSplits || dailyProfitSplits.length !== 5) {
+      if (!dailyProfitSplits || dailyProfitSplits.length !== 5 || splitsBoundary !== dayBoundaryMs) {
         const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate * 5).toFixed(2));
         dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
+        splitsBoundary = dayBoundaryMs;
       }
 
       calculatedProfit = Number(dailyProfitSplits[taskCount]) || 0;
@@ -1918,6 +1920,7 @@ exports.completeTask = onCall(async (request) => {
         lastTaskReset: admin.firestore.FieldValue.serverTimestamp(),
         lastClaimedVipLevel: newClaimedVipId,
         dailyProfitSplits: dailyProfitSplits,
+        dailyProfitSplitsBoundary: splitsBoundary,
       });
 
       const taskTaskRef = userRef.collection("tasks").doc();
@@ -1933,6 +1936,70 @@ exports.completeTask = onCall(async (request) => {
   } catch (error) {
     console.error("Error executing completeTask:", error);
     throw new HttpsError("internal", error.message || "Failed to complete task.");
+  }
+});
+
+// Lets the app show the user the EXACT profit their next task will pay
+// out, before they confirm it -- by locking in (or reusing) today's
+// random split array ahead of time, the same way completeTask itself
+// will read it. This guarantees the "Expected Profit" preview and the
+// amount actually credited on confirm are always identical.
+exports.peekTaskProfit = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const userId = request.auth.uid;
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(userId);
+  const rates = await getBonusRates(db);
+
+  let profit = 0;
+
+  try {
+    await db.runTransaction(async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) throw new HttpsError("not-found", "User document does not exist.");
+
+      const userData = userDoc.data();
+      const currentBalance = Number(userData.balance || 0);
+
+      if (currentBalance < 70) {
+        throw new HttpsError("failed-precondition", "Minimum $70 balance required to perform tasks.");
+      }
+
+      const now = new Date();
+      let lastResetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 16, 0, 0));
+      if (now.getTime() < lastResetTime.getTime()) {
+        lastResetTime.setUTCDate(lastResetTime.getUTCDate() - 1);
+      }
+      const dayBoundaryMs = lastResetTime.getTime();
+
+      const effectiveTaskCount = getEffectiveTaskCount(userData);
+      if (effectiveTaskCount >= 5) {
+        throw new HttpsError("resource-exhausted", "Daily task limit reached (5/5).");
+      }
+
+      let dailyProfitSplits = Array.isArray(userData.dailyProfitSplits) ? userData.dailyProfitSplits : null;
+      let splitsBoundary = userData.dailyProfitSplitsBoundary;
+
+      if (!dailyProfitSplits || dailyProfitSplits.length !== 5 || splitsBoundary !== dayBoundaryMs) {
+        const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate * 5).toFixed(2));
+        dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
+        splitsBoundary = dayBoundaryMs;
+
+        transaction.update(userRef, {
+          dailyProfitSplits: dailyProfitSplits,
+          dailyProfitSplitsBoundary: splitsBoundary,
+        });
+      }
+
+      profit = Number(dailyProfitSplits[effectiveTaskCount]) || 0;
+    });
+
+    return { success: true, profit: profit };
+  } catch (error) {
+    console.error("Error executing peekTaskProfit:", error);
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError("internal", error.message || "Failed to preview task profit.");
   }
 });
 
