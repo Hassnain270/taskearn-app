@@ -244,7 +244,28 @@ export default function TeamScreen({ navigation, route }) {
             Active Direct Referrals: {activeDirectCount} / {rewardThreshold}
           </Text>
           {rewardAmount > 0 && (
-            <Text style={styles.rewardAmountText}>Reward: {'
+            <Text style={styles.rewardAmountText}>Reward: {'$' + rewardAmount.toFixed(2)} USDT</Text>
+          )}
+          <TouchableOpacity
+            style={[
+              styles.claimRewardBtn,
+              (!rewardEligible || hasPendingClaim) && styles.claimRewardBtnDisabled
+            ]}
+            onPress={handleClaimReward}
+            disabled={!rewardEligible || hasPendingClaim || claimingReward}
+          >
+            {claimingReward ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.claimRewardBtnText}>
+                {hasPendingClaim ? "Request Pending Review" : (rewardEligible ? "Claim Monthly Reward" : "Requirements Not Met Yet")}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.listHeaderRow}>
+          <Text style={currentStyles.listTitle}>Direct Members</Text>
           <Text style={currentStyles.listSubTitle}>Monitors Sub-Teams</Text>
         </View>
 
