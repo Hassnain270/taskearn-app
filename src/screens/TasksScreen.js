@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
 
@@ -55,12 +56,24 @@ export default function TasksScreen({ navigation }) {
 
   const cycleKeyRef = useRef(null);
 
-  // Local activity storage is scoped per user UID, so different accounts
-  // logging into the same device (or the same account logging back in after
-  // signing out) never see stale or mixed-up data.
-  const currentUid = auth.currentUser?.uid || 'guest';
-  const CYCLE_KEY_STORAGE = `taskCycleKey_${currentUid}`;
-  const ACTIVITIES_STORAGE = `taskRecentActivities_${currentUid}`;
+  // Local activity storage is scoped per user UID, tracked as REACTIVE
+  // state via onAuthStateChanged rather than read once at render time.
+  // Reading auth.currentUser.uid directly during the very first render
+  // (right after a fresh login) can briefly return null before Firebase
+  // finishes restoring the session, which was causing activities to be
+  // saved/loaded under a wrong key and appear to randomly vanish.
+  const [authUid, setAuthUid] = useState(auth.currentUser ? auth.currentUser.uid : null);
+
+  useEffect(() => {
+    const unsubscribeAuthUid = onAuthStateChanged(auth, (user) => {
+      setAuthUid(user ? user.uid : null);
+    });
+    return () => unsubscribeAuthUid();
+  }, []);
+
+  const currentUid = authUid || 'guest';
+  const CYCLE_KEY_STORAGE = 'taskCycleKey_' + currentUid;
+  const ACTIVITIES_STORAGE = 'taskRecentActivities_' + currentUid;
 
   const productPool = [
     { name: "iPhone 16 Pro Max (256GB)", icon: "cellphone", basePrice: 1199, color: '#3B82F6' },
@@ -188,6 +201,7 @@ export default function TasksScreen({ navigation }) {
   // It never touches Firestore, so it never appears on the Home screen's
   // global Transaction History.
   useEffect(() => {
+    if (!authUid) return;
     const loadLocalActivities = async () => {
       try {
         const currentKey = getCurrentCycleKey();
@@ -207,7 +221,7 @@ export default function TasksScreen({ navigation }) {
     };
 
     loadLocalActivities();
-  }, [currentUid]);
+  }, [authUid]);
 
   useEffect(() => {
     const updateTimer = () => {
@@ -246,7 +260,7 @@ export default function TasksScreen({ navigation }) {
     const timerInterval = setInterval(updateTimer, 1000);
 
     return () => clearInterval(timerInterval);
-  }, []);
+  }, [authUid]);
 
   const handleGrabOrder = () => {
     if (effectiveTaskCount >= 5) return;
