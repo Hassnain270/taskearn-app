@@ -117,11 +117,11 @@ export default function VipScreen({ navigation, route }) {
   // range.
   const vipData = VIP_TIER_DEFS.map((tier, index) => {
     const nextTier = VIP_TIER_DEFS[index + 1];
-    const lowProfit = Number((tier.minCapital * dailyTaskProfitRate).toFixed(2));
+    const lowProfit = Number((tier.minCapital * dailyTaskProfitRate * 5).toFixed(2));
 
     let profitLabel;
     if (nextTier) {
-      const highProfit = Number(((nextTier.minCapital - 1) * dailyTaskProfitRate).toFixed(2));
+      const highProfit = Number(((nextTier.minCapital - 1) * dailyTaskProfitRate * 5).toFixed(2));
       profitLabel = `${lowProfit.toFixed(2)}-${highProfit.toFixed(2)}`;
     } else {
       profitLabel = `${lowProfit.toFixed(2)}+`;
