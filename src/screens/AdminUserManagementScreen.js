@@ -412,246 +412,241 @@ export default function AdminUserManagementScreen({ navigation }) {
                   </View>
 
                   {activeTab === 'overview' && (
-                  <View style={currentStyles.infoBox}>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Username</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.username || 'N/A'}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>UID</Text>
-                      <Text style={currentStyles.infoValue} numberOfLines={1}>{selectedDetail.uid}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Registered On</Text>
-                      <Text style={currentStyles.infoValue}>{formatDateOnly(selectedDetail.registeredAt)}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Current VIP</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.currentVip}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Referred By</Text>
-                      <Text style={currentStyles.infoValue}>{selectedDetail.referrerUsername || 'None'}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Total Earnings</Text>
-                      <Text style={currentStyles.infoValue}>${selectedDetail.totalEarnings.toFixed(2)}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Total Withdrawn</Text>
-                      <Text style={currentStyles.infoValue}>${selectedDetail.totalWithdraw.toFixed(2)}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Team Reward</Text>
-                      <Text style={currentStyles.infoValue}>${selectedDetail.teamReward.toFixed(2)}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Wallet Last Updated</Text>
-                      <Text style={currentStyles.infoValue}>{formatDate(selectedDetail.walletAddressUpdatedAt)}</Text>
-                    </View>
-                  </View>
+                    <View>
+                      <View style={currentStyles.infoBox}>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Username</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.username || 'N/A'}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>UID</Text>
+                          <Text style={currentStyles.infoValue} numberOfLines={1}>{selectedDetail.uid}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Registered On</Text>
+                          <Text style={currentStyles.infoValue}>{formatDateOnly(selectedDetail.registeredAt)}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Current VIP</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.currentVip}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Referred By</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.referrerUsername || 'None'}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Total Earnings</Text>
+                          <Text style={currentStyles.infoValue}>${selectedDetail.totalEarnings.toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Total Withdrawn</Text>
+                          <Text style={currentStyles.infoValue}>${selectedDetail.totalWithdraw.toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Team Reward</Text>
+                          <Text style={currentStyles.infoValue}>${selectedDetail.teamReward.toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Wallet Last Updated</Text>
+                          <Text style={currentStyles.infoValue}>{formatDate(selectedDetail.walletAddressUpdatedAt)}</Text>
+                        </View>
+                      </View>
 
-                  <Text style={currentStyles.sectionLabel}>DEPOSIT HISTORY (VERIFICATION)</Text>
-                  <View style={currentStyles.infoBox}>
-                    {selectedDetail.deposits && selectedDetail.deposits.length > 0 ? (
-                      selectedDetail.deposits.map((dep, idx) => (
-                        <React.Fragment key={idx}>
-                          <View style={styles.infoRow}>
-                            <Text style={styles.infoLabel}>{formatDate(dep.date)}</Text>
-                            <Text style={[currentStyles.infoValue, { color: '#10B981' }]}>+${dep.amount.toFixed(2)}</Text>
-                          </View>
-                          {idx < selectedDetail.deposits.length - 1 && <View style={currentStyles.teamDivider} />}
+                      <Text style={currentStyles.sectionLabel}>DEPOSIT HISTORY (VERIFICATION)</Text>
+                      <View style={currentStyles.infoBox}>
+                        {selectedDetail.deposits && selectedDetail.deposits.length > 0 ? (
+                          selectedDetail.deposits.map((dep, idx) => (
+                            <React.Fragment key={idx}>
+                              <View style={styles.infoRow}>
+                                <Text style={styles.infoLabel}>{formatDate(dep.date)}</Text>
+                                <Text style={[currentStyles.infoValue, { color: '#10B981' }]}>+${dep.amount.toFixed(2)}</Text>
+                              </View>
+                              {idx < selectedDetail.deposits.length - 1 && <View style={currentStyles.teamDivider} />}
+                            </React.Fragment>
+                          ))
+                        ) : (
+                          <Text style={styles.joiningNote}>No deposits made yet.</Text>
+                        )}
+                      </View>
+
+                      <Text style={currentStyles.sectionLabel}>EDITABLE FIELDS</Text>
+
+                      <Text style={styles.fieldLabel}>Email Address</Text>
+                      <TextInput
+                        style={currentStyles.editInput}
+                        value={editEmail}
+                        onChangeText={setEditEmail}
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        placeholder="Email address"
+                        placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                      />
+
+                      <Text style={styles.fieldLabel}>Phone Number</Text>
+                      <TextInput
+                        style={currentStyles.editInput}
+                        value={editPhone}
+                        onChangeText={setEditPhone}
+                        placeholder="Phone number (with country code)"
+                        placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                      />
+
+                      <Text style={styles.fieldLabel}>Wallet Address</Text>
+                      <TextInput
+                        style={currentStyles.editInput}
+                        value={editWallet}
+                        onChangeText={setEditWallet}
+                        autoCapitalize="none"
+                        placeholder="Wallet address"
+                        placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                      />
+
+                      <Text style={styles.fieldLabel}>Balance (USDT)</Text>
+                      <TextInput
+                        style={currentStyles.editInput}
+                        value={editBalance}
+                        onChangeText={(t) => setEditBalance(t.replace(/[^0-9.]/g, ''))}
+                        keyboardType="decimal-pad"
+                        placeholder="0.00"
+                        placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                      />
+
+                      {showReasonField && (
+                        <React.Fragment>
+                          <Text style={[styles.fieldLabel, { color: '#F59E0B' }]}>
+                            Reason for Balance Change (required — will appear in the user's transaction history)
+                          </Text>
+                          <TextInput
+                            style={[currentStyles.editInput, { borderColor: '#F59E0B' }]}
+                            value={balanceReason}
+                            onChangeText={setBalanceReason}
+                            placeholder="e.g. Correcting a duplicate bonus credited in error"
+                            placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                            multiline
+                          />
                         </React.Fragment>
-                      ))
-                    ) : (
-                      <Text style={styles.joiningNote}>No deposits made yet.</Text>
-                    )}
-                  </View>
+                      )}
 
-                  </View>
+                      <Text style={styles.usernameNote}>Username cannot be changed, matching the app's own permanent-username rule.</Text>
+
+                      <TouchableOpacity style={styles.saveBtn} onPress={handleSaveChanges} disabled={saving}>
+                        {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteUser} disabled={deleting}>
+                        {deleting ? <ActivityIndicator color="#EF4444" /> : <Text style={styles.deleteBtnText}>Delete This Account</Text>}
+                      </TouchableOpacity>
+                    </View>
                   )}
 
                   {activeTab === 'team' && (
-                  <View>
-                    <View style={currentStyles.infoBox}>
-                      <View style={styles.infoRow}>
-                        <Text style={styles.infoLabel}>Direct Team</Text>
-                        <Text style={currentStyles.infoValue}>{selectedDetail.directTeamCount}</Text>
-                      </View>
-                      <View style={styles.infoRow}>
-                        <Text style={styles.infoLabel}>Indirect Team</Text>
-                        <Text style={currentStyles.infoValue}>{selectedDetail.indirectTeamSize}</Text>
-                      </View>
-                      <View style={styles.infoRow}>
-                        <Text style={styles.infoLabel}>Total Team Size</Text>
-                        <Text style={currentStyles.infoValue}>{selectedDetail.totalTeamSize}</Text>
-                      </View>
-                      <View style={currentStyles.teamDivider} />
-                      <View style={styles.infoRow}>
-                        <Text style={styles.infoLabel}>Today's Joinings</Text>
-                        <Text style={currentStyles.infoValue}>{selectedDetail.todayJoinings}</Text>
-                      </View>
-                      <View style={styles.infoRow}>
-                        <Text style={styles.infoLabel}>This Week ({selectedDetail.weekLabel})</Text>
-                        <Text style={currentStyles.infoValue}>{selectedDetail.weekJoinings}</Text>
-                      </View>
-                      <View style={styles.infoRow}>
-                        <Text style={styles.infoLabel}>This Month ({selectedDetail.monthLabel})</Text>
-                        <Text style={currentStyles.infoValue}>{selectedDetail.monthJoinings}</Text>
-                      </View>
-                    </View>
-
-                    <Text style={currentStyles.sectionLabel}>ACTIVE DIRECT MEMBERS ({(selectedDetail.activeMembers || []).length})</Text>
-                    <View style={currentStyles.infoBox}>
-                      {(selectedDetail.activeMembers || []).length > 0 ? (
-                        selectedDetail.activeMembers.map((name, idx) => (
-                          <Text key={idx} style={currentStyles.infoValue}>{name}</Text>
-                        ))
-                      ) : (
-                        <Text style={styles.joiningNote}>None yet.</Text>
-                      )}
-                    </View>
-
-                    <Text style={currentStyles.sectionLabel}>INACTIVE DIRECT MEMBERS ({(selectedDetail.inactiveMembers || []).length})</Text>
-                    <View style={currentStyles.infoBox}>
-                      {(selectedDetail.inactiveMembers || []).length > 0 ? (
-                        selectedDetail.inactiveMembers.map((name, idx) => (
-                          <Text key={idx} style={currentStyles.infoValue}>{name}</Text>
-                        ))
-                      ) : (
-                        <Text style={styles.joiningNote}>None.</Text>
-                      )}
-                    </View>
-
-                    <Text style={currentStyles.sectionLabel}>CHECK A PAST MONTH</Text>
-                    <View style={currentStyles.infoBox}>
-                      <View style={styles.monthPickerRow}>
-                        <TextInput
-                          style={[currentStyles.editInput, styles.monthInputSmall, { marginBottom: 0 }]}
-                          value={yearInput}
-                          onChangeText={(t) => setYearInput(t.replace(/[^0-9]/g, ''))}
-                          keyboardType="number-pad"
-                          placeholder="Year e.g. 2026"
-                          placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                        />
-                        <TextInput
-                          style={[currentStyles.editInput, styles.monthInputSmall, { marginBottom: 0 }]}
-                          value={monthInput}
-                          onChangeText={(t) => setMonthInput(t.replace(/[^0-9]/g, ''))}
-                          keyboardType="number-pad"
-                          placeholder="Month 1-12"
-                          placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                        />
-                        <TouchableOpacity style={styles.checkMonthBtn} onPress={handleCheckMonth} disabled={monthLoading}>
-                          {monthLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.checkMonthBtnText}>Check</Text>}
-                        </TouchableOpacity>
-                      </View>
-                      {monthResult && (
-                        <View style={{ marginTop: 10 }}>
-                          <Text style={styles.joiningNote}>{monthResult.monthLabel}: {monthResult.count} joining(s)</Text>
-                          {monthResult.members.map((m, idx) => (
-                            <Text key={idx} style={currentStyles.infoValue}>{m.username} {m.isActive ? '(active)' : '(inactive)'}</Text>
-                          ))}
+                    <View>
+                      <View style={currentStyles.infoBox}>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Direct Team</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.directTeamCount}</Text>
                         </View>
-                      )}
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Indirect Team</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.indirectTeamSize}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Total Team Size</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.totalTeamSize}</Text>
+                        </View>
+                        <View style={currentStyles.teamDivider} />
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Today's Joinings</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.todayJoinings}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>This Week ({selectedDetail.weekLabel})</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.weekJoinings}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>This Month ({selectedDetail.monthLabel})</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.monthJoinings}</Text>
+                        </View>
+                      </View>
+
+                      <Text style={currentStyles.sectionLabel}>ACTIVE DIRECT MEMBERS ({(selectedDetail.activeMembers || []).length})</Text>
+                      <View style={currentStyles.infoBox}>
+                        {(selectedDetail.activeMembers || []).length > 0 ? (
+                          selectedDetail.activeMembers.map((name, idx) => (
+                            <Text key={idx} style={currentStyles.infoValue}>{name}</Text>
+                          ))
+                        ) : (
+                          <Text style={styles.joiningNote}>None yet.</Text>
+                        )}
+                      </View>
+
+                      <Text style={currentStyles.sectionLabel}>INACTIVE DIRECT MEMBERS ({(selectedDetail.inactiveMembers || []).length})</Text>
+                      <View style={currentStyles.infoBox}>
+                        {(selectedDetail.inactiveMembers || []).length > 0 ? (
+                          selectedDetail.inactiveMembers.map((name, idx) => (
+                            <Text key={idx} style={currentStyles.infoValue}>{name}</Text>
+                          ))
+                        ) : (
+                          <Text style={styles.joiningNote}>None.</Text>
+                        )}
+                      </View>
+
+                      <Text style={currentStyles.sectionLabel}>CHECK A PAST MONTH</Text>
+                      <View style={currentStyles.infoBox}>
+                        <View style={styles.monthPickerRow}>
+                          <TextInput
+                            style={[currentStyles.editInput, styles.monthInputSmall, { marginBottom: 0 }]}
+                            value={yearInput}
+                            onChangeText={(t) => setYearInput(t.replace(/[^0-9]/g, ''))}
+                            keyboardType="number-pad"
+                            placeholder="Year e.g. 2026"
+                            placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                          />
+                          <TextInput
+                            style={[currentStyles.editInput, styles.monthInputSmall, { marginBottom: 0 }]}
+                            value={monthInput}
+                            onChangeText={(t) => setMonthInput(t.replace(/[^0-9]/g, ''))}
+                            keyboardType="number-pad"
+                            placeholder="Month 1-12"
+                            placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                          />
+                          <TouchableOpacity style={styles.checkMonthBtn} onPress={handleCheckMonth} disabled={monthLoading}>
+                            {monthLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.checkMonthBtnText}>Check</Text>}
+                          </TouchableOpacity>
+                        </View>
+                        {monthResult && (
+                          <View style={{ marginTop: 10 }}>
+                            <Text style={styles.joiningNote}>{monthResult.monthLabel}: {monthResult.count} joining(s)</Text>
+                            {monthResult.members.map((m, idx) => (
+                              <Text key={idx} style={currentStyles.infoValue}>{m.username} {m.isActive ? '(active)' : '(inactive)'}</Text>
+                            ))}
+                          </View>
+                        )}
+                      </View>
                     </View>
-                  </View>
-                  )}
-
-                  {activeTab === 'overview' && (
-                  <View style={currentStyles.infoBox}>
-                  <Text style={currentStyles.sectionLabel}>EDITABLE FIELDS</Text>
-
-                  <Text style={styles.fieldLabel}>Email Address</Text>
-                  <TextInput
-                    style={currentStyles.editInput}
-                    value={editEmail}
-                    onChangeText={setEditEmail}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    placeholder="Email address"
-                    placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                  />
-
-                  <Text style={styles.fieldLabel}>Phone Number</Text>
-                  <TextInput
-                    style={currentStyles.editInput}
-                    value={editPhone}
-                    onChangeText={setEditPhone}
-                    placeholder="Phone number (with country code)"
-                    placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                  />
-
-                  <Text style={styles.fieldLabel}>Wallet Address</Text>
-                  <TextInput
-                    style={currentStyles.editInput}
-                    value={editWallet}
-                    onChangeText={setEditWallet}
-                    autoCapitalize="none"
-                    placeholder="Wallet address"
-                    placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                  />
-
-                  <Text style={styles.fieldLabel}>Balance (USDT)</Text>
-                  <TextInput
-                    style={currentStyles.editInput}
-                    value={editBalance}
-                    onChangeText={(t) => setEditBalance(t.replace(/[^0-9.]/g, ''))}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                  />
-
-                  {showReasonField && (
-                    <>
-                      <Text style={[styles.fieldLabel, { color: '#F59E0B' }]}>
-                        Reason for Balance Change (required — will appear in the user's transaction history)
-                      </Text>
-                      <TextInput
-                        style={[currentStyles.editInput, { borderColor: '#F59E0B' }]}
-                        value={balanceReason}
-                        onChangeText={setBalanceReason}
-                        placeholder="e.g. Correcting a duplicate bonus credited in error"
-                        placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                        multiline
-                      />
-                    </>
-                  )}
-
-                  <Text style={styles.usernameNote}>Username cannot be changed, matching the app's own permanent-username rule.</Text>
-
-                  <TouchableOpacity style={styles.saveBtn} onPress={handleSaveChanges} disabled={saving}>
-                    {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteUser} disabled={deleting}>
-                    {deleting ? <ActivityIndicator color="#EF4444" /> : <Text style={styles.deleteBtnText}>Delete This Account</Text>}
-                  </TouchableOpacity>
-                  </View>
                   )}
 
                   {activeTab === 'history' && (
-                  <View>
-                    <View style={styles.txFilterRow}>
-                      {['all', 'credit', 'debit'].map((f) => (
-                        <TouchableOpacity
-                          key={f}
-                          style={[styles.txFilterBtn, historyFilter === f && styles.txFilterBtnActive]}
-                          onPress={() => setHistoryFilter(f)}
-                        >
-                          <Text style={[styles.detailTabText, historyFilter === f && styles.detailTabTextActive]}>
-                            {f === 'all' ? 'All' : f === 'credit' ? 'Credited' : 'Debited'}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-
-                    {transactionsLoading ? (
-                      <View style={styles.detailLoaderBox}>
-                        <ActivityIndicator size="large" color="#2563EB" />
+                    <View>
+                      <View style={styles.txFilterRow}>
+                        {['all', 'credit', 'debit'].map((f) => (
+                          <TouchableOpacity
+                            key={f}
+                            style={[styles.txFilterBtn, historyFilter === f && styles.txFilterBtnActive]}
+                            onPress={() => setHistoryFilter(f)}
+                          >
+                            <Text style={[styles.detailTabText, historyFilter === f && styles.detailTabTextActive]}>
+                              {f === 'all' ? 'All' : f === 'credit' ? 'Credited' : 'Debited'}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
                       </View>
-                    ) : (
-                      (() => {
+
+                      {transactionsLoading ? (
+                        <View style={styles.detailLoaderBox}>
+                          <ActivityIndicator size="large" color="#2563EB" />
+                        </View>
+                      ) : (() => {
                         const filtered = transactions.filter((t) => {
                           if (historyFilter === 'all') return true;
                           const isCredit = t.isCredit !== false;
@@ -667,17 +662,16 @@ export default function AdminUserManagementScreen({ navigation }) {
                               <View style={styles.infoRow}>
                                 <Text style={currentStyles.infoValue}>{t.title}</Text>
                                 <Text style={[styles.txAmount, { color: isCredit ? '#10B981' : '#EF4444' }]}>
-                                  {isCredit ? '+' : '-'}${Number(t.amount).toFixed(2)}
+                                  {isCredit ? '+' : '-'}{'$' + Number(t.amount).toFixed(2)}
                                 </Text>
                               </View>
                               <Text style={styles.joiningNote}>{t.date ? formatDate(t.date) : 'Date unknown'}</Text>
-                              {t.reason && <Text style={styles.joiningNote}>Reason: {t.reason}</Text>}
+                              {t.reason ? <Text style={styles.joiningNote}>Reason: {t.reason}</Text> : null}
                             </View>
                           );
                         });
-                      })()
-                    )}
-                  </View>
+                      })()}
+                    </View>
                   )}
 
                 </ScrollView>
