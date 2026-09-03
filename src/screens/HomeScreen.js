@@ -178,6 +178,13 @@ export default function HomeScreen({ navigation, route }) {
   const [indirectReferralRate, setIndirectReferralRate] = useState(0.05);
   const [welcomeBonusRate, setWelcomeBonusRate] = useState(0.07);
 
+  // Promotion popup -- fetched fresh every time Home mounts (i.e. every
+  // app open), so it always reflects whatever the admin currently has
+  // active in Bonus Settings. Nothing is shown if there's no active
+  // promotion right now.
+  const [activePromotion, setActivePromotion] = useState(null);
+  const [showPromotionModal, setShowPromotionModal] = useState(false);
+
   const bannerData = [
     { id: 1, title: "Invite Friends & Team Commission", desc: `Get ${formatPercent(directReferralRate)}% instant commission on Level 1 direct members and ${formatPercent(indirectReferralRate)}% recurring bonus on Level 2 indirect team task completions.`, icon: "account-multiple-plus", color: "#10B981" },
     { id: 2, title: "Daily Task Reward Model", desc: "Complete exactly 5 orders daily to qualify for profit settlement. Higher VIPs unlock bigger profits.", icon: "clipboard-check", color: "#3B82F6" },
@@ -244,6 +251,22 @@ export default function HomeScreen({ navigation, route }) {
       }
     };
     loadBonusRates();
+  }, []);
+
+  useEffect(() => {
+    const loadPromotion = async () => {
+      try {
+        const getActivePromotion = httpsCallable(functionsInstance, 'getActivePromotion');
+        const res = await getActivePromotion();
+        if (res.data && res.data.active === true) {
+          setActivePromotion(res.data);
+          setShowPromotionModal(true);
+        }
+      } catch (err) {
+        // No active promotion or fetch failed -- silently skip the popup.
+      }
+    };
+    loadPromotion();
   }, []);
 
   useEffect(() => {
@@ -521,6 +544,25 @@ export default function HomeScreen({ navigation, route }) {
           </TouchableOpacity>
         ))}
       </View>
+
+      {showPromotionModal && activePromotion && (
+        <View style={styles.promoOverlay}>
+          <View style={[styles.promoModalBox, { backgroundColor: isDarkMode ? "#161B22" : "#FFFFFF" }]}>
+            <View style={styles.promoIconCircle}>
+              <MaterialCommunityIcons name="gift-outline" size={32} color="#EAB308" />
+            </View>
+            <Text style={[styles.promoModalTitle, { color: isDarkMode ? "#FFFFFF" : "#1E293B" }]}>
+              {activePromotion.title}
+            </Text>
+            <Text style={[styles.promoModalMessage, { color: isDarkMode ? "#94A3B8" : "#64748B" }]}>
+              {activePromotion.message}
+            </Text>
+            <TouchableOpacity style={styles.promoModalBtn} onPress={() => setShowPromotionModal(false)}>
+              <Text style={styles.promoModalBtnText}>Got It</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -618,5 +660,12 @@ const styles = StyleSheet.create({
   tickerBox: { flex: 1, height: 24, overflow: 'hidden' },
   menuItem: { width: '33.33%', alignItems: 'center', paddingVertical: 12 },
   tabItem: { alignItems: 'center' },
-  tabText: { fontSize: 9, fontWeight: '700', color: '#94A3B8', marginTop: 3 }
+  tabText: { fontSize: 9, fontWeight: '700', color: '#94A3B8', marginTop: 3 },
+  promoOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24, zIndex: 9999 },
+  promoModalBox: { width: '100%', maxWidth: 380, borderRadius: 24, padding: 24, alignItems: 'center' },
+  promoIconCircle: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(234,179,8,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
+  promoModalTitle: { fontSize: 17, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
+  promoModalMessage: { fontSize: 13, textAlign: 'center', lineHeight: 19, fontWeight: '500', marginBottom: 20 },
+  promoModalBtn: { backgroundColor: '#3B82F6', width: '100%', height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  promoModalBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' }
 });
