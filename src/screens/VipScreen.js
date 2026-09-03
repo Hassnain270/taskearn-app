@@ -18,6 +18,25 @@ import { ThemeContext } from '../../ThemeContext';
 
 const functionsInstance = getFunctions();
 
+// Static per-tier facts that never change (id, name, capital thresholds,
+// and the display label for the capital range). The DAILY PROFIT numbers
+// are deliberately NOT stored here anymore — they are computed live from
+// whatever dailyTaskProfitRate the admin currently has set in Bonus
+// Settings, so this screen can never show a stale/mismatched number
+// again.
+const VIP_TIER_DEFS = [
+  { id: 1, name: "VIP 1", minCapital: 70, capital: "70-149" },
+  { id: 2, name: "VIP 2", minCapital: 150, capital: "150-299" },
+  { id: 3, name: "VIP 3", minCapital: 300, capital: "300-499" },
+  { id: 4, name: "VIP 4", minCapital: 500, capital: "500-999" },
+  { id: 5, name: "VIP 5", minCapital: 1000, capital: "1,000-1,499" },
+  { id: 6, name: "VIP 6", minCapital: 1500, capital: "1,500-2,999" },
+  { id: 7, name: "VIP 7", minCapital: 3000, capital: "3,000-4,999" },
+  { id: 8, name: "VIP 8", minCapital: 5000, capital: "5,000-9,999" },
+  { id: 9, name: "VIP 9", minCapital: 10000, capital: "10,000-19,999" },
+  { id: 10, name: "VIP 10", minCapital: 20000, capital: "20,000+" },
+];
+
 export default function VipScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
@@ -28,10 +47,11 @@ export default function VipScreen({ navigation, route }) {
   // calculating each row's bonus amount anymore (see calculateUpgradeBonus).
   const [lastClaimedVipLevel, setLastClaimedVipLevel] = useState(0);
 
-  // Defaults to the standard rate while the real value loads from the
-  // central config, so the displayed upgrade bonuses are never wrong for
-  // more than a moment.
+  // Defaults to the standard rates while the real values load from the
+  // central config, so the displayed numbers are never wrong for more
+  // than a moment.
   const [vipUpgradeRate, setVipUpgradeRate] = useState(0.05);
+  const [dailyTaskProfitRate, setDailyTaskProfitRate] = useState(0.0032);
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -55,18 +75,20 @@ export default function VipScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
-    const loadBonusRate = async () => {
+    const loadBonusRates = async () => {
       try {
         const getBonusConfig = httpsCallable(functionsInstance, 'getBonusConfig');
         const res = await getBonusConfig();
-        if (typeof res.data?.rates?.vipUpgradeRate === 'number') {
-          setVipUpgradeRate(res.data.rates.vipUpgradeRate);
+        const rates = res.data?.rates;
+        if (rates) {
+          if (typeof rates.vipUpgradeRate === 'number') setVipUpgradeRate(rates.vipUpgradeRate);
+          if (typeof rates.dailyTaskProfitRate === 'number') setDailyTaskProfitRate(rates.dailyTaskProfitRate);
         }
       } catch (err) {
-        // Keep the default rate if this fails — never block the screen.
+        // Keep the default rates if this fails — never block the screen.
       }
     };
-    loadBonusRate();
+    loadBonusRates();
   }, []);
 
   const getActiveVipId = (balance) => {
@@ -86,18 +108,33 @@ export default function VipScreen({ navigation, route }) {
   const activeVipId = getActiveVipId(totalBalance);
   const hasPendingBonus = lastClaimedVipLevel < activeVipId;
 
-  const vipData = [
-    { id: 1, name: "VIP 1", minCapital: 70, capital: "70-149", profit: "1.16-2.40" },
-    { id: 2, name: "VIP 2", minCapital: 150, capital: "150-299", profit: "2.40-4.80" },
-    { id: 3, name: "VIP 3", minCapital: 300, capital: "300-499", profit: "4.80-8.00" },
-    { id: 4, name: "VIP 4", minCapital: 500, capital: "500-999", profit: "8.00-16.00" },
-    { id: 5, name: "VIP 5", minCapital: 1000, capital: "1,000-1,499", profit: "16.00-24.00" },
-    { id: 6, name: "VIP 6", minCapital: 1500, capital: "1,500-2,999", profit: "24.00-48.00" },
-    { id: 7, name: "VIP 7", minCapital: 3000, capital: "3,000-4,999", profit: "48.00-80.00" },
-    { id: 8, name: "VIP 8", minCapital: 5000, capital: "5,000-9,999", profit: "80.00-160.0" },
-    { id: 9, name: "VIP 9", minCapital: 10000, capital: "10,000-19,999", profit: "160.0-320.0" },
-    { id: 10, name: "VIP 10", minCapital: 20000, capital: "20,000+", profit: "320.0-640.0" },
-  ];
+  // Builds each tier's DAILY PROFIT range live from the current
+  // dailyTaskProfitRate: the low end is this tier's own minimum capital
+  // times the rate, and the high end is just below the NEXT tier's
+  // minimum capital times the rate (since reaching that capital would
+  // actually place the account in the next tier). VIP 10 has no tier
+  // above it, so it is shown as an open-ended "X+" value instead of a
+  // range.
+  const vipData = VIP_TIER_DEFS.map((tier, index) => {
+    const nextTier = VIP_TIER_DEFS[index + 1];
+    const lowProfit = Number((tier.minCapital * dailyTaskProfitRate).toFixed(2));
+
+    let profitLabel;
+    if (nextTier) {
+      const highProfit = Number(((nextTier.minCapital - 1) * dailyTaskProfitRate).toFixed(2));
+      profitLabel = `${lowProfit.toFixed(2)}-${highProfit.toFixed(2)}`;
+    } else {
+      profitLabel = `${lowProfit.toFixed(2)}+`;
+    }
+
+    return {
+      id: tier.id,
+      name: tier.name,
+      minCapital: tier.minCapital,
+      capital: tier.capital,
+      profit: profitLabel,
+    };
+  });
 
   // Shows ONLY the single-step bonus for going from the tier immediately
   // below this one, up to this one — a fixed reference value for that one
