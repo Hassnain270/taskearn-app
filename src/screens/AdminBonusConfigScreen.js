@@ -79,6 +79,15 @@ const RATE_FIELDS = [
   },
 ];
 
+const formatDateForInput = (millis) => {
+  if (!millis) return '';
+  const d = new Date(millis);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return yyyy + '-' + mm + '-' + dd;
+};
+
 export default function AdminBonusConfigScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
@@ -148,6 +157,16 @@ export default function AdminBonusConfigScreen({ navigation }) {
           setRewardAmount(a);
           setOriginalRewardThreshold(t);
           setOriginalRewardAmount(a);
+        }
+
+        const getPromoConfig = httpsCallable(functions, 'getPromotionConfigForAdmin');
+        const promoRes = await getPromoConfig();
+        if (promoRes.data) {
+          setPromoActive(promoRes.data.active === true);
+          setPromoTitle(promoRes.data.title || '');
+          setPromoMessage(promoRes.data.message || '');
+          setPromoStartDate(formatDateForInput(promoRes.data.startDate));
+          setPromoEndDate(formatDateForInput(promoRes.data.endDate));
         }
       } catch (err) {
         showAlert('Error', err.message || 'Failed to load current bonus rates.');
