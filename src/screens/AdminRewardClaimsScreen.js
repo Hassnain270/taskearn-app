@@ -9,7 +9,8 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
-  Platform
+  Platform,
+  TextInput
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,12 +54,15 @@ export default function AdminRewardClaimsScreen({ navigation }) {
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchMode, setIsSearchMode] = useState(false);
 
-  const loadClaims = useCallback(async (status) => {
+  const loadClaims = useCallback(async (status, username) => {
     setLoading(true);
     try {
       const getClaims = httpsCallable(functions, 'adminGetRewardClaims');
-      const res = await getClaims({ status });
+      const payload = username ? { username } : { status };
+      const res = await getClaims(payload);
       setClaims((res.data && res.data.claims) || []);
     } catch (err) {
       showAlert('Error', err.message || 'Failed to load reward claims.');
@@ -67,6 +71,22 @@ export default function AdminRewardClaimsScreen({ navigation }) {
       setLoading(false);
     }
   }, []);
+
+  const handleSearch = () => {
+    const cleanQuery = searchQuery.trim();
+    if (!cleanQuery) {
+      showAlert('Search Required', 'Enter a username to search their full claim history.');
+      return;
+    }
+    setIsSearchMode(true);
+    loadClaims(null, cleanQuery);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+    setIsSearchMode(false);
+    loadClaims(activeTab);
+  };
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -96,6 +116,8 @@ export default function AdminRewardClaimsScreen({ navigation }) {
 
   const handleTabChange = (tabKey) => {
     setActiveTab(tabKey);
+    setIsSearchMode(false);
+    setSearchQuery('');
     loadClaims(tabKey);
   };
 
@@ -117,7 +139,11 @@ export default function AdminRewardClaimsScreen({ navigation }) {
             try {
               const updateStatus = httpsCallable(functions, 'adminUpdateRewardClaimStatus');
               await updateStatus({ claimId: claim.claimId, newStatus });
-              setClaims((prev) => prev.filter((c) => c.claimId !== claim.claimId));
+              if (isSearchMode) {
+                setClaims((prev) => prev.map((c) => c.claimId === claim.claimId ? Object.assign({}, c, { status: newStatus }) : c));
+              } else {
+                setClaims((prev) => prev.filter((c) => c.claimId !== claim.claimId));
+              }
               showAlert('Done', `Claim ${newStatus === 'approved' ? 'approved and credited' : 'rejected'} successfully.`);
             } catch (err) {
               showAlert('Error', err.message || 'Failed to update this claim.');
@@ -153,7 +179,7 @@ export default function AdminRewardClaimsScreen({ navigation }) {
         )}
       </View>
 
-      {activeTab === 'pending' && (
+      {item.status === 'pending' && (
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={[styles.actionBtn, styles.rejectBtn]}
@@ -180,15 +206,15 @@ export default function AdminRewardClaimsScreen({ navigation }) {
         </View>
       )}
 
-      {activeTab !== 'pending' && (
-        <View style={[styles.statusPill, activeTab === 'approved' ? styles.statusPillApproved : styles.statusPillRejected]}>
+      {item.status !== 'pending' && (
+        <View style={[styles.statusPill, item.status === 'approved' ? styles.statusPillApproved : styles.statusPillRejected]}>
           <MaterialCommunityIcons
-            name={activeTab === 'approved' ? 'check-circle' : 'close-circle'}
+            name={item.status === 'approved' ? 'check-circle' : 'close-circle'}
             size={14}
-            color={activeTab === 'approved' ? '#22C55E' : '#EF4444'}
+            color={item.status === 'approved' ? '#22C55E' : '#EF4444'}
           />
-          <Text style={[styles.statusPillText, { color: activeTab === 'approved' ? '#22C55E' : '#EF4444' }]}>
-            {activeTab === 'approved' ? 'Approved & Credited' : 'Rejected'}
+          <Text style={[styles.statusPillText, { color: item.status === 'approved' ? '#22C55E' : '#EF4444' }]}>
+            {item.status === 'approved' ? 'Approved & Credited' : 'Rejected'}
           </Text>
         </View>
       )}
@@ -226,6 +252,34 @@ export default function AdminRewardClaimsScreen({ navigation }) {
         <View style={{ width: 36 }} />
       </View>
 
+      <View style={styles.searchSection}>
+        <View style={currentStyles.searchWrapper}>
+          <Feather name="search" size={16} color={isDarkMode ? "#8B949E" : "#94A3B8"} />
+          <TextInput
+            style={currentStyles.searchInput}
+            placeholder="Search by exact username"
+            placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            onSubmitEditing={handleSearch}
+            returnKeyType="search"
+          />
+          {isSearchMode && (
+            <TouchableOpacity onPress={clearSearch}>
+              <Feather name="x" size={16} color={isDarkMode ? "#8B949E" : "#94A3B8"} />
+            </TouchableOpacity>
+          )}
+        </View>
+        <TouchableOpacity style={styles.searchBtn} onPress={handleSearch}>
+          <Text style={styles.searchBtnText}>Search</Text>
+        </TouchableOpacity>
+      </View>
+
+      {isSearchMode && (
+        <Text style={styles.searchModeNote}>Showing full claim history for "{searchQuery.trim()}" across all statuses.</Text>
+      )}
+
       <View style={currentStyles.tabRow}>
         {TABS.map((tab) => (
           <TouchableOpacity
@@ -247,7 +301,7 @@ export default function AdminRewardClaimsScreen({ navigation }) {
       ) : claims.length === 0 ? (
         <View style={styles.loaderContainer}>
           <MaterialCommunityIcons name="cash-multiple" size={32} color={isDarkMode ? "#334155" : "#CBD5E1"} />
-          <Text style={styles.emptyText}>No {activeTab} reward claims.</Text>
+          <Text style={styles.emptyText}>{isSearchMode ? 'No claims found for that username.' : ('No ' + activeTab + ' reward claims.')}</Text>
         </View>
       ) : (
         <FlatList
@@ -267,6 +321,8 @@ const lightStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#1E293B' },
+  searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', gap: 8 },
+  searchInput: { flex: 1, fontSize: 13, color: '#1E293B' },
   tabRow: { flexDirection: 'row', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   tabButtonText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
   claimCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#F1F5F9' },
@@ -280,6 +336,8 @@ const darkStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#161B22', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#21262D', gap: 8 },
+  searchInput: { flex: 1, fontSize: 13, color: '#FFFFFF' },
   tabRow: { flexDirection: 'row', backgroundColor: '#161B22', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8, borderBottomWidth: 1, borderBottomColor: '#21262D' },
   tabButtonText: { fontSize: 12, fontWeight: '700', color: '#94A3B8' },
   claimCard: { backgroundColor: '#161B22', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#21262D' },
@@ -289,6 +347,10 @@ const darkStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  searchSection: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8 },
+  searchBtn: { backgroundColor: '#3B82F6', height: 44, paddingHorizontal: 18, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  searchBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  searchModeNote: { fontSize: 11, color: '#94A3B8', fontWeight: '500', paddingHorizontal: 16, marginBottom: 8, fontStyle: 'italic' },
   loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
   emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500' },
   listContainer: { paddingHorizontal: 16, paddingTop: 14 },
