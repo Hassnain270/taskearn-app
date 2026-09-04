@@ -169,6 +169,7 @@ const DEFAULT_BONUS_RATES = {
 const DEFAULT_MONTHLY_REWARD_CONFIG = {
   directReferralThreshold: 15,
   rewardAmount: 50,
+  active: true,
 };
 
 async function getBonusRates(db) {
@@ -198,6 +199,7 @@ async function getMonthlyRewardConfigInternal(db) {
       return {
         directReferralThreshold: typeof data.directReferralThreshold === "number" ? data.directReferralThreshold : DEFAULT_MONTHLY_REWARD_CONFIG.directReferralThreshold,
         rewardAmount: typeof data.rewardAmount === "number" ? data.rewardAmount : DEFAULT_MONTHLY_REWARD_CONFIG.rewardAmount,
+        active: typeof data.active === "boolean" ? data.active : DEFAULT_MONTHLY_REWARD_CONFIG.active,
       };
     }
   } catch (e) {
@@ -2389,8 +2391,9 @@ exports.getMonthlyRewardStatus = onCall(async (request) => {
     success: true,
     threshold: config.directReferralThreshold,
     rewardAmount: config.rewardAmount,
+    systemActive: config.active,
     activeDirectCount: activeCount,
-    eligible: activeCount >= config.directReferralThreshold,
+    eligible: config.active && activeCount >= config.directReferralThreshold,
     hasPendingClaim: !pendingSnap.empty,
   };
 });
@@ -2409,6 +2412,9 @@ exports.updateMonthlyRewardConfig = onCall(async (request) => {
   }
   if (typeof data.rewardAmount === "number" && data.rewardAmount >= 0) {
     updates.rewardAmount = data.rewardAmount;
+  }
+  if (typeof data.active === "boolean") {
+    updates.active = data.active;
   }
   if (Object.keys(updates).length === 0) {
     throw new HttpsError("invalid-argument", "No valid fields were provided.");
@@ -2430,6 +2436,11 @@ exports.claimMonthlyReward = onCall(async (request) => {
   const userData = userDoc.data();
 
   const config = await getMonthlyRewardConfigInternal(db);
+
+  if (!config.active) {
+    throw new HttpsError("failed-precondition", "Monthly rewards are not currently being accepted.");
+  }
+
   const activeCount = await countActiveDirectReferrals(db, userId);
 
   if (activeCount < config.directReferralThreshold) {
