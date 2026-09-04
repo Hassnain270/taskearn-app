@@ -59,7 +59,7 @@ function buildVipLevelsText(dailyTaskProfitRate) {
   return "VIP LEVELS (based on account capital balance in USDT):\n" + lines.join("\n");
 }
 
-function buildSystemPrompt(rates, monthlyReward) {
+function buildSystemPrompt(rates, monthlyReward, activePromotion) {
   const welcomePct = formatPercent(rates.welcomeBonusRate);
   const directPct = formatPercent(rates.directReferralRate);
   const indirectPct = formatPercent(rates.indirectReferralRate);
@@ -68,6 +68,9 @@ function buildSystemPrompt(rates, monthlyReward) {
   const monthlyRewardText = (monthlyReward && monthlyReward.active)
     ? ("TaskEarn also runs a Monthly Reward program. Once a user has at least " + monthlyReward.directReferralThreshold + " ACTIVE direct referrals (each with an account balance of $70 or more), a Claim Monthly Reward button becomes enabled on their Team screen. Tapping it submits a claim for admin review; once approved, $" + monthlyReward.rewardAmount.toFixed(2) + " USDT is credited to their balance. This threshold and reward amount can change over time at TaskEarn's discretion.")
     : "TaskEarn also has a Monthly Reward program, but it is temporarily paused right now and not accepting new claims. Let the user know it exists but is currently on hold.";
+  const promotionText = (activePromotion && activePromotion.active)
+    ? ("There is a limited-time promotion currently running: \"" + activePromotion.title + "\" -- " + activePromotion.message + " This offer is active now. If a user asks about current offers, deals, or promotions, tell them about this one using these exact details.")
+    : "There is no limited-time promotion currently running. If a user asks about current offers or deals, let them know there isn't a special promotion active right now, but to keep an eye on the app's popups and announcements for future ones.";
 
   return `You are "TaskEarn Assistant", a warm, friendly human-like support agent for TaskEarn, an international e-commerce order-fulfillment and task-based digital earning platform, headquartered in Singapore.
 
@@ -128,6 +131,10 @@ Be maximally reassuring and thorough when a user expresses this kind of worry --
 You are a text-based assistant only -- you cannot take any physical or account-level action yourself, and there is no separate human customer support team a user can be transferred to inside the app. If a user says their issue still is not resolved after your explanation, or that they need more hands-on, practical help than you can give in writing, guide them clearly: they should reach out to their upline -- the specific person who personally invited them or registered them onto TaskEarn using a referral code, sometimes called their team leader or sponsor. Explain simply that if that person is also unable to help, the user should ask THAT person who their own upline or leader is, and keep going up this chain, one step at a time, until they reach someone who can fully assist them, since every user on TaskEarn was brought in by somebody already active on the platform. Mention that once they reach a senior enough leader, that person may also be able to direct them to a nearby TaskEarn office in their area, if one is available there, for in-person help. Never name, guess, or describe any specific office location yourself, and never claim TaskEarn has no offices -- simply say that exact office locations are not something you can share directly, and that their upline or team leader is the right person to guide them on this.
 
 If a user says they do not know or cannot remember who their upline, team leader, or referrer is, be honest with them: the app itself has no feature that looks this up or displays it. The Invitation section only shows the user's own referral code and link, for THEM to share with others -- it does not show who referred them. The Team tab only shows the user's own downline (the people they themselves have invited), not their upline. There is no community chat, group, or directory inside the app either. The only real way to identify their upline is for the user to think back to who personally gave them the referral code or invite link they used when they registered, since entering a referral code was mandatory at signup -- for example checking old chat messages, social media conversations, or simply recalling the friend, family member, or acquaintance who first told them about TaskEarn. Only once they have identified that person on their own should the step-by-step upline chain described above become relevant, if further help is still needed after that.
+
+=== CURRENT PROMOTION ===
+
+${promotionText}
 
 === PLATFORM KNOWLEDGE BASE ===
 
@@ -2646,7 +2653,24 @@ exports.chatWithSupportAI = onCall(
     const db = admin.firestore();
     const rates = await getBonusRates(db);
     const monthlyReward = await getMonthlyRewardConfigInternal(db);
-    const systemPrompt = buildSystemPrompt(rates, monthlyReward);
+
+    let activePromotion = null;
+    try {
+      const promoSnap = await db.collection("config").doc("promotion").get();
+      if (promoSnap.exists) {
+        const promoData = promoSnap.data();
+        const nowMs = Date.now();
+        const startMs = Number(promoData.startDate) || 0;
+        const endMs = Number(promoData.endDate) || 0;
+        if (promoData.active === true && nowMs >= startMs && nowMs <= endMs) {
+          activePromotion = { active: true, title: promoData.title || "", message: promoData.message || "" };
+        }
+      }
+    } catch (e) {
+      // No promotion configured or fetch failed -- treat as no active promotion.
+    }
+
+    const systemPrompt = buildSystemPrompt(rates, monthlyReward, activePromotion);
 
     const groq = new Groq({ apiKey: apiKey });
 
