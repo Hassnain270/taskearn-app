@@ -210,9 +210,13 @@ export default function TasksScreen({ navigation }) {
 
         cycleKeyRef.current = currentKey;
 
+        console.log('[DEBUG-ACTIVITIES] authUid=' + authUid + ' key=' + ACTIVITIES_STORAGE + ' storedKey=' + storedKey + ' currentKey=' + currentKey + ' storedActivities=' + storedActivities);
+
         if (storedKey === currentKey && storedActivities) {
+          console.log('[DEBUG-ACTIVITIES] LOADED existing activities');
           setRecentActivities(JSON.parse(storedActivities));
         } else {
+          console.log('[DEBUG-ACTIVITIES] RESETTING to empty (mismatch or no stored data)');
           await AsyncStorage.setItem(CYCLE_KEY_STORAGE, currentKey);
           await AsyncStorage.setItem(ACTIVITIES_STORAGE, JSON.stringify([]));
           setRecentActivities([]);
