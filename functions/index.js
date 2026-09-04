@@ -28,11 +28,46 @@ function isBalanceActive(userLikeData) {
   return bal >= 70;
 }
 
-function buildSystemPrompt(rates) {
+function buildVipLevelsText(dailyTaskProfitRate) {
+  const tiers = [
+    { id: 1, min: 70, capLabel: "$70 to $149" },
+    { id: 2, min: 150, capLabel: "$150 to $299" },
+    { id: 3, min: 300, capLabel: "$300 to $499" },
+    { id: 4, min: 500, capLabel: "$500 to $999" },
+    { id: 5, min: 1000, capLabel: "$1,000 to $1,499" },
+    { id: 6, min: 1500, capLabel: "$1,500 to $2,999" },
+    { id: 7, min: 3000, capLabel: "$3,000 to $4,999" },
+    { id: 8, min: 5000, capLabel: "$5,000 to $9,999" },
+    { id: 9, min: 10000, capLabel: "$10,000 to $19,999" },
+    { id: 10, min: 20000, capLabel: "$20,000 and above" },
+  ];
+  const nextMins = [150, 300, 500, 1000, 1500, 3000, 5000, 10000, 20000, null];
+
+  const lines = tiers.map((tier, idx) => {
+    const low = Number((tier.min * dailyTaskProfitRate * 5).toFixed(2));
+    const nextMin = nextMins[idx];
+    let profitLabel;
+    if (nextMin) {
+      const high = Number(((nextMin - 1) * dailyTaskProfitRate * 5).toFixed(2));
+      profitLabel = "$" + low.toFixed(2) + " to $" + high.toFixed(2);
+    } else {
+      profitLabel = "$" + low.toFixed(2) + " and up";
+    }
+    return "VIP " + tier.id + ": " + tier.capLabel + " capital, daily profit " + profitLabel;
+  });
+
+  return "VIP LEVELS (based on account capital balance in USDT):\n" + lines.join("\n");
+}
+
+function buildSystemPrompt(rates, monthlyReward) {
   const welcomePct = formatPercent(rates.welcomeBonusRate);
   const directPct = formatPercent(rates.directReferralRate);
   const indirectPct = formatPercent(rates.indirectReferralRate);
   const vipUpgradePct = formatPercent(rates.vipUpgradeRate);
+  const vipLevelsText = buildVipLevelsText(rates.dailyTaskProfitRate);
+  const monthlyRewardText = (monthlyReward && monthlyReward.active)
+    ? ("TaskEarn also runs a Monthly Reward program. Once a user has at least " + monthlyReward.directReferralThreshold + " ACTIVE direct referrals (each with an account balance of $70 or more), a Claim Monthly Reward button becomes enabled on their Team screen. Tapping it submits a claim for admin review; once approved, $" + monthlyReward.rewardAmount.toFixed(2) + " USDT is credited to their balance. This threshold and reward amount can change over time at TaskEarn's discretion.")
+    : "TaskEarn also has a Monthly Reward program, but it is temporarily paused right now and not accepting new claims. Let the user know it exists but is currently on hold.";
 
   return `You are "TaskEarn Assistant", a warm, friendly human-like support agent for TaskEarn, an international e-commerce order-fulfillment and task-based digital earning platform, headquartered in Singapore.
 
@@ -96,17 +131,7 @@ If a user says they do not know or cannot remember who their upline, team leader
 
 === PLATFORM KNOWLEDGE BASE ===
 
-VIP LEVELS (based on account capital balance in USDT):
-VIP 1: $70 to $149 capital, daily profit $1.16 to $2.40
-VIP 2: $150 to $299 capital, daily profit $2.40 to $4.80
-VIP 3: $300 to $499 capital, daily profit $4.80 to $8.00
-VIP 4: $500 to $999 capital, daily profit $8.00 to $16.00
-VIP 5: $1,000 to $1,499 capital, daily profit $16.00 to $24.00
-VIP 6: $1,500 to $2,999 capital, daily profit $24.00 to $48.00
-VIP 7: $3,000 to $4,999 capital, daily profit $48.00 to $80.00
-VIP 8: $5,000 to $9,999 capital, daily profit $80.00 to $160.00
-VIP 9: $10,000 to $19,999 capital, daily profit $160.00 to $320.00
-VIP 10: $20,000 and above capital, daily profit $320.00 to $640.00
+${vipLevelsText}
 VIP Upgrade Bonus: currently ${vipUpgradePct} percent of the capital increase, credited only for the single step from the user's immediately preceding VIP level to the newly unlocked one when their next completed daily task confirms the upgrade. It is not paid cumulatively for levels skipped earlier.
 
 DAILY TASKS: Complete 5 tasks per day (Home -> Tasks -> Grab Order Now) to earn daily profit, calculated as a percentage of the user's balance. Minimum $70 balance required to perform tasks. The task cycle resets once every 24 hours.
@@ -134,6 +159,8 @@ TRANSACTION HISTORY: Home -> History. Shows Deposits, Withdrawals, Welcome Bonus
 
 TEAM AND REFERRALS: TEAM tab shows the user's own team size, joinings, and their own direct members (their downline), split into active members (account balance of $70 or more, the same threshold that unlocks VIP 1) and inactive members (balance below $70) -- it does not show who referred the user themselves. Get your referral link: Home -> Invitation, which displays only the user's own referral code and link for sharing with others.
 Direct and indirect referral bonuses are ONE-TIME bonuses, not an ongoing share of a referred member's income. When a Level 1 (direct) referred member makes a deposit that activates a VIP capital tier, their referrer receives a one-time bonus equal to ${directPct} percent of that VIP capital amount. If that direct member was themselves referred by someone else, that second-level (indirect) referrer also receives a one-time bonus of ${indirectPct} percent of the same VIP capital amount, at that same moment. Both bonuses are paid once, at the moment of that specific deposit-triggered VIP activation -- they are never a recurring percentage of the referred member's daily task earnings or any of their future income, and they have no ongoing connection to how much that member goes on to earn afterward.
+
+${monthlyRewardText}
 
 WALLET CONFIGURATION: Me -> Wallet Configuration. TRC20 addresses start with 'T' and are 34 characters long; BEP20 addresses start with '0x' and are 42 characters long.
 
@@ -2479,8 +2506,12 @@ exports.adminGetRewardClaims = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Only administrators may view reward claims.");
   }
 
+  const usernameFilter = request.data && request.data.username ? String(request.data.username).trim() : null;
   const status = (request.data && request.data.status) || "pending";
-  const snap = await db.collection("rewardClaims").where("status", "==", status).get();
+
+  const snap = usernameFilter
+    ? await db.collection("rewardClaims").where("username", "==", usernameFilter).get()
+    : await db.collection("rewardClaims").where("status", "==", status).get();
   const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : null;
 
   const claims = snap.docs.map((d) => {
@@ -2614,7 +2645,8 @@ exports.chatWithSupportAI = onCall(
 
     const db = admin.firestore();
     const rates = await getBonusRates(db);
-    const systemPrompt = buildSystemPrompt(rates);
+    const monthlyReward = await getMonthlyRewardConfigInternal(db);
+    const systemPrompt = buildSystemPrompt(rates, monthlyReward);
 
     const groq = new Groq({ apiKey: apiKey });
 
