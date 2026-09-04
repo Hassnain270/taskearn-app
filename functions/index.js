@@ -2319,6 +2319,33 @@ exports.getActivePromotion = onCall(async (request) => {
   };
 });
 
+// Lets the admin see whatever promotion is currently configured --
+// active, scheduled, or expired -- so the Bonus Settings screen can be
+// pre-filled instead of always appearing blank. This is what makes it
+// possible for an admin to turn an active promotion off early or edit
+// its dates/text, since without this they can't see what's already set.
+exports.getPromotionConfigForAdmin = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const snap = await db.collection("config").doc("promotion").get();
+  if (!snap.exists) {
+    return { active: false, title: "", message: "", startDate: 0, endDate: 0 };
+  }
+  const data = snap.data();
+  return {
+    active: data.active === true,
+    title: data.title || "",
+    message: data.message || "",
+    startDate: Number(data.startDate) || 0,
+    endDate: Number(data.endDate) || 0,
+  };
+});
+
 exports.updatePromotionConfig = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
