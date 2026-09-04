@@ -48,6 +48,7 @@ export default function TeamScreen({ navigation, route }) {
   const [rewardEligible, setRewardEligible] = useState(false);
   const [hasPendingClaim, setHasPendingClaim] = useState(false);
   const [claimingReward, setClaimingReward] = useState(false);
+  const [rewardSystemActive, setRewardSystemActive] = useState(true);
 
   useEffect(() => {
     const fetchTeamStats = async () => {
@@ -88,6 +89,7 @@ export default function TeamScreen({ navigation, route }) {
           setActiveDirectCount(res.data.activeDirectCount || 0);
           setRewardEligible(res.data.eligible === true);
           setHasPendingClaim(res.data.hasPendingClaim === true);
+          setRewardSystemActive(res.data.systemActive !== false);
         }
       } catch (error) {
         console.error("Reward status error:", error);
@@ -249,16 +251,16 @@ export default function TeamScreen({ navigation, route }) {
           <TouchableOpacity
             style={[
               styles.claimRewardBtn,
-              (!rewardEligible || hasPendingClaim) && styles.claimRewardBtnDisabled
+              (!rewardSystemActive || !rewardEligible || hasPendingClaim) && styles.claimRewardBtnDisabled
             ]}
             onPress={handleClaimReward}
-            disabled={!rewardEligible || hasPendingClaim || claimingReward}
+            disabled={!rewardSystemActive || !rewardEligible || hasPendingClaim || claimingReward}
           >
             {claimingReward ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
               <Text style={styles.claimRewardBtnText}>
-                {hasPendingClaim ? "Request Pending Review" : (rewardEligible ? "Claim Monthly Reward" : "Requirements Not Met Yet")}
+                {!rewardSystemActive ? "Monthly Rewards Currently Paused" : (hasPendingClaim ? "Request Pending Review" : (rewardEligible ? "Claim Monthly Reward" : "Requirements Not Met Yet"))}
               </Text>
             )}
           </TouchableOpacity>

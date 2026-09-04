@@ -107,6 +107,8 @@ export default function AdminBonusConfigScreen({ navigation }) {
   const [originalRewardThreshold, setOriginalRewardThreshold] = useState('15');
   const [originalRewardAmount, setOriginalRewardAmount] = useState('0');
   const [savingReward, setSavingReward] = useState(false);
+  const [rewardActive, setRewardActive] = useState(true);
+  const [originalRewardActive, setOriginalRewardActive] = useState(true);
 
   const [promoActive, setPromoActive] = useState(false);
   const [promoTitle, setPromoTitle] = useState('');
@@ -157,6 +159,9 @@ export default function AdminBonusConfigScreen({ navigation }) {
           setRewardAmount(a);
           setOriginalRewardThreshold(t);
           setOriginalRewardAmount(a);
+          const sysActive = rewardRes.data.systemActive !== false;
+          setRewardActive(sysActive);
+          setOriginalRewardActive(sysActive);
         }
 
         const getPromoConfig = httpsCallable(functions, 'getPromotionConfigForAdmin');
@@ -241,7 +246,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
     }
   };
 
-  const rewardHasChanges = rewardThreshold !== originalRewardThreshold || rewardAmount !== originalRewardAmount;
+  const rewardHasChanges = rewardThreshold !== originalRewardThreshold || rewardAmount !== originalRewardAmount || rewardActive !== originalRewardActive;
 
   const handleSaveReward = async () => {
     const thresholdNum = parseInt(rewardThreshold, 10);
@@ -259,7 +264,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
     setSavingReward(true);
     try {
       const updateConfig = httpsCallable(functions, 'updateMonthlyRewardConfig');
-      const res = await updateConfig({ directReferralThreshold: thresholdNum, rewardAmount: amountNum });
+      const res = await updateConfig({ directReferralThreshold: thresholdNum, rewardAmount: amountNum, active: rewardActive });
       const newConfig = res.data.config;
       const t = String(newConfig.directReferralThreshold);
       const a = String(newConfig.rewardAmount);
@@ -267,6 +272,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
       setRewardAmount(a);
       setOriginalRewardThreshold(t);
       setOriginalRewardAmount(a);
+      setOriginalRewardActive(rewardActive);
       showAlert('Saved', 'Monthly reward requirements updated. Every user\'s eligibility on the Team screen updates automatically.');
     } catch (err) {
       showAlert('Error', err.message || 'Failed to save reward settings.');
@@ -394,6 +400,11 @@ export default function AdminBonusConfigScreen({ navigation }) {
               <Text style={currentStyles.infoDescription}>
                 Sets the eligibility requirement shown on every user's Team screen. Changing this instantly updates whether each user's claim button is enabled.
               </Text>
+            </View>
+
+            <View style={[currentStyles.fieldCard, styles.promoToggleRow]}>
+              <Text style={currentStyles.fieldLabel}>Monthly Reward System Active</Text>
+              <Switch value={rewardActive} onValueChange={setRewardActive} trackColor={{ true: '#EAB308' }} />
             </View>
 
             <View style={currentStyles.fieldCard}>
