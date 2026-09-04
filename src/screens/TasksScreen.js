@@ -288,11 +288,17 @@ export default function TasksScreen({ navigation }) {
       }
     }, stepIntervalDuration);
 
-    setTimeout(() => {
+    const animationDelay = new Promise((resolve) => setTimeout(resolve, executionDuration));
+    const peekTaskProfit = httpsCallable(functionsInstance, 'peekTaskProfit');
+    const profitFetch = peekTaskProfit()
+      .then((res) => (res && res.data && typeof res.data.profit === 'number') ? res.data.profit : null)
+      .catch(() => null);
+
+    Promise.all([animationDelay, profitFetch]).then(([, peekedProfit]) => {
       clearInterval(statusInterval);
       setCurrentStepIndex(serverSteps.length - 1);
       const randomProduct = productPool[Math.floor(Math.random() * productPool.length)];
-      const finalProfit = parseFloat((balance * dailyTaskProfitRate).toFixed(2));
+      const finalProfit = peekedProfit !== null ? peekedProfit : parseFloat((balance * dailyTaskProfitRate * 5).toFixed(2));
       const randomID = Math.floor(100000 + Math.random() * 900000).toString();
 
       setSelectedProduct({
@@ -306,7 +312,7 @@ export default function TasksScreen({ navigation }) {
       setCurrentProfit(finalProfit);
       setIsGrabbing(false);
       setShowPopup(true);
-    }, executionDuration);
+    });
   };
 
   const handleConfirmOrder = async () => {
