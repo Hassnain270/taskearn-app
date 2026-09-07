@@ -265,9 +265,9 @@ export default function RegisterScreen({ navigation, route }) {
   // Same constraint as the Login screen's username field: no spaces,
   // maximum 12 characters.
   const handleUsernameChange = (text) => {
-    const noSpaces = text.replace(/\s/g, '');
-    if (noSpaces.length <= 12) {
-      setUsername(noSpaces);
+    const cleaned = text.replace(/[^a-zA-Z0-9]/g, '');
+    if (cleaned.length <= 12) {
+      setUsername(cleaned);
     }
   };
 
