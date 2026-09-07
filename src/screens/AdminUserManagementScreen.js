@@ -274,6 +274,20 @@ export default function AdminUserManagementScreen({ navigation }) {
     );
   };
 
+  const handleFixUsername = async () => {
+    if (!selectedDetail) return;
+    const cleaned = String(selectedDetail.username || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    try {
+      const fixFn = httpsCallable(functions, 'adminFixUsername');
+      const res = await fixFn({ uid: selectedDetail.uid, newUsername: cleaned });
+      showAlert('Fixed', 'Username cleaned to: ' + res.data.cleanedUsername);
+      closeDetailModal();
+      handleSearch();
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to fix username.');
+    }
+  };
+
   const handleInspectIdentifier = async () => {
     if (!selectedDetail) return;
     try {
@@ -551,6 +565,10 @@ export default function AdminUserManagementScreen({ navigation }) {
 
                       <TouchableOpacity style={styles.saveBtn} onPress={handleInspectIdentifier}>
                     <Text style={styles.saveBtnText}>Inspect Hidden Characters (Debug)</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.saveBtn} onPress={handleFixUsername}>
+                    <Text style={styles.saveBtnText}>Remove Special Characters From Username</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteUser} disabled={deleting}>
