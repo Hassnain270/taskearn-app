@@ -528,6 +528,15 @@ exports.checkRegistrationAvailability = onCall(async (request) => {
     if (cleanEmail) {
       const q = await db.collection("users").where("email", "==", cleanEmail).limit(1).get();
       result.emailTaken = !q.empty;
+
+      if (!result.emailTaken) {
+        try {
+          await admin.auth().getUserByEmail(cleanEmail);
+          result.emailTaken = true;
+        } catch (authLookupErr) {
+          // No Firebase Authentication account with this email -- genuinely available.
+        }
+      }
     }
 
     if (cleanPhone) {
@@ -896,6 +905,64 @@ exports.adminGetUserTransactions = onCall(async (request) => {
   return { success: true, transactions: txs };
 });
 
+// Moves a list of existing users (by username) to become direct
+// referrals of a different account. Built specifically for the case
+// where a user's original account was deleted and they re-registered
+// under a new account -- this lets their old direct team be reattached
+// to the new account instead of being permanently lost.
+exports.adminMigrateTeamMembers = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may do this.");
+  }
+
+  const data = request.data || {};
+  const newUid = data.newUid;
+  const usernames = Array.isArray(data.usernames) ? data.usernames : [];
+  if (!newUid || usernames.length === 0) {
+    throw new HttpsError("invalid-argument", "A destination user and at least one username are required.");
+  }
+
+  const newUserDoc = await db.collection("users").doc(newUid).get();
+  if (!newUserDoc.exists) throw new HttpsError("not-found", "Destination user account not found.");
+  const newUserData = newUserDoc.data();
+  const newReferralCode = newUserData.referralCode || newUserData.referral || newUid.substring(0, 6).toUpperCase();
+
+  const results = [];
+  const batch = db.batch();
+  let anyMoved = false;
+
+  for (const rawUsername of usernames) {
+    const cleanUsername = String(rawUsername).trim().toLowerCase();
+    if (!cleanUsername) continue;
+
+    const memberSnap = await db.collection("users").where("username", "==", cleanUsername).limit(1).get();
+    if (memberSnap.empty) {
+      results.push({ username: rawUsername, status: "not_found" });
+      continue;
+    }
+
+    const memberDoc = memberSnap.docs[0];
+    if (memberDoc.id === newUid) {
+      results.push({ username: rawUsername, status: "skipped_self" });
+      continue;
+    }
+
+    batch.update(memberDoc.ref, {
+      referredByUid: newUid,
+      referredBy: newReferralCode,
+    });
+    anyMoved = true;
+    results.push({ username: rawUsername, status: "moved" });
+  }
+
+  if (anyMoved) await batch.commit();
+
+  return { success: true, results: results };
+});
+
 exports.adminDeleteUser = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
@@ -929,6 +996,10 @@ exports.adminDeleteUser = onCall(async (request) => {
     await admin.auth().deleteUser(uid);
   } catch (authErr) {
     console.error(`Failed to delete Firebase Auth account for ${uid} (Firestore doc already removed):`, authErr.message);
+    return {
+      success: true,
+      authWarning: "The account data was removed, but the underlying login (Firebase Authentication) record could not be deleted: " + authErr.message + ". The same email/phone may fail to register or log in correctly until this is resolved manually in the Firebase Console (Authentication tab).",
+    };
   }
 
   return { success: true };
