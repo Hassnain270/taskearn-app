@@ -963,6 +963,75 @@ exports.adminMigrateTeamMembers = onCall(async (request) => {
   return { success: true, results: results };
 });
 
+// Reveals the EXACT stored characters (as numeric Unicode code points)
+// of a user's username and email -- used to catch invisible characters
+// (e.g. a zero-width space slipped in by a mobile keyboard's
+// autocomplete) that look identical on screen but silently break exact
+// matching during login.
+exports.adminInspectIdentifier = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may do this.");
+  }
+
+  const uid = request.data && request.data.uid;
+  if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
+
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+  const data = userDoc.data();
+
+  const toCodes = (str) => String(str || "").split("").map((ch) => ch.charCodeAt(0));
+
+  return {
+    username: data.username || null,
+    usernameLength: (data.username || "").length,
+    usernameCharCodes: toCodes(data.username),
+    email: data.email || null,
+    emailLength: (data.email || "").length,
+    emailCharCodes: toCodes(data.email),
+  };
+});
+
+// Cleans invisible/zero-width characters and re-saves the username --
+// unlike normal account editing, this is the one path allowed to change
+// a username, specifically to repair an account broken by a hidden
+// character that made login permanently fail despite the password and
+// visible username being correct.
+exports.adminFixUsername = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may do this.");
+  }
+
+  const data = request.data || {};
+  const uid = data.uid;
+  const newUsername = data.newUsername;
+  if (!uid || !newUsername) throw new HttpsError("invalid-argument", "A user UID and new username are required.");
+
+  const cleaned = String(newUsername)
+    .replace(/[\u200B-\u200D\uFEFF\u00A0\s]/g, "")
+    .trim()
+    .toLowerCase();
+
+  if (!cleaned || cleaned.length < 6 || cleaned.length > 12) {
+    throw new HttpsError("invalid-argument", "Cleaned username must be between 6 and 12 characters.");
+  }
+
+  const dup = await db.collection("users").where("username", "==", cleaned).limit(1).get();
+  if (!dup.empty && dup.docs[0].id !== uid) {
+    throw new HttpsError("already-exists", "This cleaned username is already taken by another account.");
+  }
+
+  await db.collection("users").doc(uid).update({ username: cleaned });
+
+  return { success: true, cleanedUsername: cleaned };
+});
+
 exports.adminDeleteUser = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
