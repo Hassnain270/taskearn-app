@@ -507,6 +507,10 @@ exports.checkRegistrationAvailability = onCall(async (request) => {
   const db = admin.firestore();
 
   const cleanUsername = (username || "").trim().toLowerCase();
+
+  if (cleanUsername && /[^a-z0-9]/.test(cleanUsername)) {
+    return { usernameTaken: false, emailTaken: false, phoneTaken: false, referralValid: true, referrerUid: null, usernameInvalidChars: true };
+  }
   const cleanEmail = (email || "").trim().toLowerCase();
   const cleanPhone = (phone || "").trim();
   const cleanRef = (referral || "").trim().toUpperCase();
