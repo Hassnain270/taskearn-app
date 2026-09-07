@@ -11,7 +11,10 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
+
+const functionsInstance = getFunctions();
 
 export default function AdminPanelScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
@@ -19,6 +22,8 @@ export default function AdminPanelScreen({ navigation }) {
 
   const [accessChecked, setAccessChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [platformStats, setPlatformStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -37,6 +42,21 @@ export default function AdminPanelScreen({ navigation }) {
       }
     };
     checkAccess();
+  }, []);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const getStats = httpsCallable(functionsInstance, 'adminGetPlatformStats');
+        const res = await getStats();
+        setPlatformStats(res.data);
+      } catch (err) {
+        // Not an admin, or fetch failed -- leave the card hidden.
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+    loadStats();
   }, []);
 
   const safeNavigate = (targetScreen) => {
@@ -100,6 +120,41 @@ export default function AdminPanelScreen({ navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+
+        {!statsLoading && platformStats && (
+          <View style={currentStyles.statsCard}>
+            <Text style={styles.statsCardTitle}>PLATFORM OVERVIEW</Text>
+
+            <View style={styles.statsRow}>
+              <View style={styles.statsBox}>
+                <Text style={styles.statsLabel}>Total Registered</Text>
+                <Text style={[styles.statsValue, { color: '#3B82F6' }]}>{platformStats.totalRegisteredUsers}</Text>
+              </View>
+              <View style={styles.statsBox}>
+                <Text style={styles.statsLabel}>Active</Text>
+                <Text style={[styles.statsValue, { color: '#22C55E' }]}>{platformStats.totalActiveUsers}</Text>
+              </View>
+              <View style={styles.statsBox}>
+                <Text style={styles.statsLabel}>Inactive</Text>
+                <Text style={[styles.statsValue, { color: '#94A3B8' }]}>{platformStats.totalInactiveUsers}</Text>
+              </View>
+            </View>
+
+            <View style={currentStyles.statsDivider} />
+
+            <View style={styles.statsRow}>
+              <View style={styles.statsBox}>
+                <Text style={styles.statsLabel}>Total Deposited (All-Time)</Text>
+                <Text style={[styles.statsValue, { color: '#22C55E' }]}>${platformStats.totalDepositedAmount.toFixed(2)}</Text>
+              </View>
+              <View style={styles.statsBox}>
+                <Text style={styles.statsLabel}>Total Withdrawn (All-Time)</Text>
+                <Text style={[styles.statsValue, { color: '#EF4444' }]}>${platformStats.totalWithdrawnAmount.toFixed(2)}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         <View style={currentStyles.optionsGroup}>
           {panelItems.map((item, index) => (
             <React.Fragment key={item.target}>
@@ -137,7 +192,9 @@ const lightStyles = StyleSheet.create({
   optionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 16 },
   iconWrapper: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   optionTitle: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
-  divider: { height: 1, backgroundColor: '#F1F5F9', marginLeft: 70 }
+  divider: { height: 1, backgroundColor: '#F1F5F9', marginLeft: 70 },
+  statsCard: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#F1F5F9', padding: 16, marginBottom: 16 },
+  statsDivider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 12 }
 });
 
 const darkStyles = StyleSheet.create({
@@ -149,7 +206,9 @@ const darkStyles = StyleSheet.create({
   optionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 16 },
   iconWrapper: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   optionTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
-  divider: { height: 1, backgroundColor: '#21262D', marginLeft: 70 }
+  divider: { height: 1, backgroundColor: '#21262D', marginLeft: 70 },
+  statsCard: { backgroundColor: '#161B22', borderRadius: 16, borderWidth: 1, borderColor: '#21262D', padding: 16, marginBottom: 16 },
+  statsDivider: { height: 1, backgroundColor: '#21262D', marginVertical: 12 }
 });
 
 const styles = StyleSheet.create({
@@ -158,5 +217,10 @@ const styles = StyleSheet.create({
   optionTextBlock: { flex: 1 },
   optionSubtitle: { fontSize: 11, color: '#94A3B8', fontWeight: '500', marginTop: 3, lineHeight: 15 },
   accessDeniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 40 },
-  accessDeniedText: { fontSize: 13, color: '#94A3B8', fontWeight: '500', textAlign: 'center' }
+  accessDeniedText: { fontSize: 13, color: '#94A3B8', fontWeight: '500', textAlign: 'center' },
+  statsCardTitle: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 12 },
+  statsRow: { flexDirection: 'row', gap: 12 },
+  statsBox: { flex: 1 },
+  statsLabel: { fontSize: 10, fontWeight: '600', color: '#94A3B8', marginBottom: 4 },
+  statsValue: { fontSize: 18, fontWeight: '800' }
 });
