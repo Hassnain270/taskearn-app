@@ -131,10 +131,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   const handleUsernameChange = (text) => {
-    const noSpaces = text.replace(/\s/g, '');
-    if (noSpaces.length <= 12) {
-      setUsername(noSpaces);
-    }
+    setUsername(text.replace(/\s/g, ''));
   };
 
   const handleLogin = async () => {
@@ -418,7 +415,6 @@ export default function LoginScreen({ navigation }) {
                 placeholderTextColor="#94A3B8"
                 value={username}
                 onChangeText={handleUsernameChange}
-                maxLength={12}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
