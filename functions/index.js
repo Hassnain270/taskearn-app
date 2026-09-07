@@ -1036,6 +1036,57 @@ exports.adminFixUsername = onCall(async (request) => {
   return { success: true, cleanedUsername: cleaned };
 });
 
+// Platform-wide overview for the admin dashboard: total registered
+// accounts across EVERYONE (not just the admin's own direct referrals),
+// how many are active vs inactive, and the running lifetime totals of
+// every deposit ever confirmed and every withdrawal ever completed --
+// so the admin can see the platform's real financial position at a
+// glance.
+exports.adminGetPlatformStats = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const usersSnap = await db.collection("users").get();
+  let totalRegisteredUsers = 0;
+  let totalActiveUsers = 0;
+  usersSnap.forEach((docSnap) => {
+    totalRegisteredUsers++;
+    if (isBalanceActive(docSnap.data())) totalActiveUsers++;
+  });
+  const totalInactiveUsers = totalRegisteredUsers - totalActiveUsers;
+
+  const depositSnap = await db.collection("transactions")
+    .where("type", "==", "DEPOSIT")
+    .where("status", "==", "approved")
+    .get();
+  let totalDepositedAmount = 0;
+  depositSnap.forEach((docSnap) => {
+    totalDepositedAmount += Number(docSnap.data().amount || 0);
+  });
+
+  const withdrawalSnap = await db.collection("transactions")
+    .where("type", "==", "WITHDRAWAL")
+    .where("status", "==", "approved")
+    .get();
+  let totalWithdrawnAmount = 0;
+  withdrawalSnap.forEach((docSnap) => {
+    totalWithdrawnAmount += Number(docSnap.data().amount || 0);
+  });
+
+  return {
+    success: true,
+    totalRegisteredUsers: totalRegisteredUsers,
+    totalActiveUsers: totalActiveUsers,
+    totalInactiveUsers: totalInactiveUsers,
+    totalDepositedAmount: Number(totalDepositedAmount.toFixed(2)),
+    totalWithdrawnAmount: Number(totalWithdrawnAmount.toFixed(2)),
+  };
+});
+
 exports.adminDeleteUser = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
