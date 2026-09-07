@@ -72,6 +72,8 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [monthResult, setMonthResult] = useState(null);
   const [monthLoading, setMonthLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [migrateUsernames, setMigrateUsernames] = useState('');
+  const [migrating, setMigrating] = useState(false);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -125,6 +127,7 @@ export default function AdminUserManagementScreen({ navigation }) {
     setMonthResult(null);
     setYearInput('');
     setMonthInput('');
+    setMigrateUsernames('');
     try {
       const detailFn = httpsCallable(functions, 'adminGetUserDetail');
       const res = await detailFn({ uid });
@@ -242,6 +245,34 @@ export default function AdminUserManagementScreen({ navigation }) {
       showAlert('Error', err.message || 'Failed to load joinings for that month.');
     } finally {
       setMonthLoading(false);
+    }
+  };
+
+  const handleMigrateTeam = async () => {
+    if (!selectedDetail) return;
+    const usernames = migrateUsernames
+      .split(/[\n,]+/)
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0);
+
+    if (usernames.length === 0) {
+      showAlert('No Usernames', 'Enter at least one username to move, separated by commas or new lines.');
+      return;
+    }
+
+    setMigrating(true);
+    try {
+      const migrateFn = httpsCallable(functions, 'adminMigrateTeamMembers');
+      const res = await migrateFn({ newUid: selectedDetail.uid, usernames });
+      const results = res.data.results || [];
+      const summary = results.map((r) => r.username + ': ' + r.status).join('\n');
+      showAlert('Migration Complete', summary);
+      setMigrateUsernames('');
+      openUserDetail(selectedDetail.uid);
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to migrate team members.');
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -660,6 +691,23 @@ export default function AdminUserManagementScreen({ navigation }) {
                             ))}
                           </View>
                         )}
+                      </View>
+
+                      <Text style={currentStyles.sectionLabel}>MOVE MEMBERS INTO THIS USER'S TEAM</Text>
+                      <View style={currentStyles.infoBox}>
+                        <Text style={styles.joiningNote}>Enter usernames (comma or new-line separated) of members who should become this user's direct referrals. Their own sub-teams move with them automatically.</Text>
+                        <TextInput
+                          style={[currentStyles.editInput, { height: 90, textAlignVertical: 'top', marginTop: 10 }]}
+                          value={migrateUsernames}
+                          onChangeText={setMigrateUsernames}
+                          autoCapitalize="none"
+                          multiline
+                          placeholder={'username1, username2, username3'}
+                          placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                        />
+                        <TouchableOpacity style={styles.checkMonthBtn} onPress={handleMigrateTeam} disabled={migrating}>
+                          {migrating ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.checkMonthBtnText}>Move These Members Here</Text>}
+                        </TouchableOpacity>
                       </View>
                     </View>
                   )}
