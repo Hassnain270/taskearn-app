@@ -148,7 +148,7 @@ DAILY TASKS: Complete 5 tasks per day (Home -> Tasks -> Grab Order Now) to earn 
 
 DEPOSITS: Supported networks are TRC-20 (Tron) and BEP-20 (BNB Smart Chain) for USDT only. Home -> Deposit. Users must choose the exact same network on both the sending platform and inside the app; sending funds via the wrong network, or sending any asset other than USDT, results in permanently unrecoverable funds, since TaskEarn cannot recover assets sent to the wrong blockchain network. The sending platform (exchange or wallet) usually charges its own small network fee, typically around $1 USDT on TRC-20 or $0.30 USDT on BEP-20 -- this fee goes to the network/sending platform, not to TaskEarn. A ${welcomePct} percent welcome bonus is automatically credited on a user's very first deposit only.
 
-WITHDRAWALS: Minimum withdrawal amount is $15.00 USDT. A 7 percent fee applies. Processing time is 0 to 48 hours. A withdrawal wallet address must be configured first (Me -> Wallet Configuration), and all 5 daily tasks must be completed before a withdrawal can be requested -- these are checked before the verification code is even sent. Only profit is withdrawable; the original deposited capital remains locked in the account (this capital is what keeps a user's VIP level active). A user may only have one withdrawal request pending at a time -- a second withdrawal cannot be submitted until the first pending one has been processed (either completed or rejected). If a user changes their settlement wallet address while a withdrawal is already pending, that pending withdrawal is not affected by the change at all -- it will still be sent to whichever wallet address was on file at the exact moment the request was submitted. The newly updated wallet address only takes effect for withdrawal requests made after the change.
+WITHDRAWALS: A user must have personally unlocked at least VIP 1 (an account balance of $70 or more) before any withdrawal is allowed, regardless of how that balance was reached. Minimum withdrawal amount is $15.00 USDT. A 7 percent fee applies. Processing time is 0 to 48 hours. A withdrawal wallet address must be configured first (Me -> Wallet Configuration), and all 5 daily tasks must be completed before a withdrawal can be requested -- these are checked before the verification code is even sent. Only profit is withdrawable; the original deposited capital remains locked in the account (this capital is what keeps a user's VIP level active). A user may only have one withdrawal request pending at a time -- a second withdrawal cannot be submitted until the first pending one has been processed (either completed or rejected). If a user changes their settlement wallet address while a withdrawal is already pending, that pending withdrawal is not affected by the change at all -- it will still be sent to whichever wallet address was on file at the exact moment the request was submitted. The newly updated wallet address only takes effect for withdrawal requests made after the change.
 
 ACCOUNT SECURITY AND VERIFICATION CODES (OTP RULES):
 This is account-level security -- protecting an individual user's own login and settings from being changed by someone else -- not platform-level trust; use the PLATFORM TRUST AND LEGITIMACY section above for questions about whether TaskEarn itself is safe or legitimate.
@@ -168,7 +168,9 @@ A username is chosen once, during registration, and can never be changed afterwa
 TRANSACTION HISTORY: Home -> History. Shows Deposits, Withdrawals, Welcome Bonus, Direct Referral Bonus, Indirect Referral Bonus, VIP Upgrade Bonus, Task Commission, Monthly Rewards, and any manual balance correction made by TaskEarn's headquarters team, which always includes a stated reason.
 
 TEAM AND REFERRALS: TEAM tab shows the user's own team size, joinings, and their own direct members (their downline), split into active members (account balance of $70 or more, the same threshold that unlocks VIP 1) and inactive members (balance below $70) -- it does not show who referred the user themselves. Get your referral link: Home -> Invitation, which displays only the user's own referral code and link for sharing with others.
-Direct and indirect referral bonuses are ONE-TIME bonuses, not an ongoing share of a referred member's income. When a Level 1 (direct) referred member makes a deposit that activates a VIP capital tier, their referrer receives a one-time bonus equal to ${directPct} percent of that VIP capital amount. If that direct member was themselves referred by someone else, that second-level (indirect) referrer also receives a one-time bonus of ${indirectPct} percent of the same VIP capital amount, at that same moment. Both bonuses are paid once, at the moment of that specific deposit-triggered VIP activation -- they are never a recurring percentage of the referred member's daily task earnings or any of their future income, and they have no ongoing connection to how much that member goes on to earn afterward.
+Direct and indirect referral bonuses are ONE-TIME bonuses, not an ongoing share of a referred member's income. When a Level 1 (direct) referred member makes a deposit that activates a VIP capital tier, their referrer receives a one-time bonus equal to ${directPct} percent of that VIP capital amount. If that direct member was themselves referred by someone else, that second-level (indirect) referrer also receives a one-time bonus of ${indirectPct} percent of the same VIP capital amount, at that same moment. Both bonuses are paid once, at the moment of that specific deposit-triggered VIP activation -- they are never a recurring percentage of the referred member's daily task earnings or any of their future income, and they have no ongoing connection to how much that member goes on to earn afterward. This referral bonus is paid strictly ONCE per referred member -- specifically at the exact moment that member's balance first reaches $70 or more (their first-ever VIP unlock), calculated on the full capital of whichever tier that first activation reaches. Any further deposits or VIP upgrades that same member makes afterward NEVER generate any additional referral bonus for their upline. The referrer must also themselves be an active account (balance of $70 or more) at that exact moment for the bonus to be paid -- if not, that one-time opportunity is permanently forfeited and can never be paid later, even if the referrer becomes active afterward.
+
+Accounts that register but never unlock VIP 1 (never reach a $70 balance) within 30 days of registration are automatically and permanently deleted. There is no way to prevent or reverse this except by depositing to reach at least $70 within that window. Importantly, the referrer must themselves be an active account (balance of $70 or more) at the moment their referred member's deposit is confirmed for that bonus to be paid -- if the referrer is not active yet, that specific bonus opportunity is permanently forfeited and cannot be claimed later, even if the referrer becomes active afterward. Separately, when a user deposits in multiple installments and crosses into a new VIP tier, they also receive their own VIP Upgrade Bonus on just the incremental capital reached in that step -- calculated the same way whether the tier is reached via deposits or via daily task profit, and never recalculated on the full balance more than once.
 
 ${monthlyRewardText}
 
@@ -1216,8 +1218,26 @@ exports.adminUpdateUserData = onCall(async (request) => {
       );
     }
 
-    updates.balance = roundedBalance;
-    updates.totalBalance = roundedBalance;
+    const previousManualVipId = Number(currentUserData.lastClaimedVipLevel || 0);
+    const manualTier = getVipTierByBalance(roundedBalance);
+    let manualVipBonus = 0;
+    let newManualVipId = previousManualVipId;
+
+    if (manualTier && manualTier.id > previousManualVipId) {
+      const prevManualTier = VIP_TIERS.find((t) => t.id === previousManualVipId);
+      const previousManualCapital = prevManualTier ? prevManualTier.minCapital : 0;
+      const manualCapitalDifference = manualTier.minCapital - previousManualCapital;
+
+      if (manualCapitalDifference > 0) {
+        const manualRates = await getBonusRates(db);
+        manualVipBonus = Number((manualCapitalDifference * manualRates.vipUpgradeRate).toFixed(2));
+      }
+      newManualVipId = manualTier.id;
+    }
+
+    updates.balance = Number((roundedBalance + manualVipBonus).toFixed(2));
+    updates.totalBalance = updates.balance;
+    updates.lastClaimedVipLevel = newManualVipId;
   }
 
   if (Object.keys(updates).length === 0) {
@@ -1229,6 +1249,19 @@ exports.adminUpdateUserData = onCall(async (request) => {
 
   await userRef.update(updates);
 
+  if (typeof manualVipBonus !== "undefined" && manualVipBonus > 0) {
+    const manualBonusTxRef = db.collection("transactions").doc();
+    await manualBonusTxRef.set({
+      transactionId: manualBonusTxRef.id,
+      userId: uid,
+      type: "VIP_UPGRADE_BONUS",
+      amount: manualVipBonus,
+      status: "approved",
+      title: "VIP " + newManualVipId + " Upgrade Bonus (Admin Adjustment)",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
   if (balanceDiff !== 0) {
     const isCredit = balanceDiff > 0;
     const adjTxRef = db.collection("transactions").doc();
@@ -1239,7 +1272,7 @@ exports.adminUpdateUserData = onCall(async (request) => {
       amount: Math.abs(balanceDiff),
       status: "approved",
       isCredit: isCredit,
-      title: `${isCredit ? "Balance Correction (Added)" : "Balance Correction (Deducted)"}: ${cleanBalanceReason}`,
+      title: cleanBalanceReason,
       reason: cleanBalanceReason,
       adjustedBy: request.auth.uid,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1260,6 +1293,13 @@ exports.requestWithdrawalOtp = onCall(
     const userDoc = await db.collection("users").doc(userId).get();
     if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
     const userData = userDoc.data();
+
+    if (!isBalanceActive(userData)) {
+      throw new HttpsError(
+        "failed-precondition",
+        "You need to unlock at least VIP 1 (an account balance of $70 or more) before you can withdraw."
+      );
+    }
 
     if (!userData.walletAddress || !String(userData.walletAddress).trim()) {
       throw new HttpsError(
@@ -1332,6 +1372,13 @@ exports.requestWithdrawal = onCall(async (request) => {
 
       const userData = userDoc.data();
       notifyUsername = userData.username || userData.email || "A user";
+
+      if (!isBalanceActive(userData)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "You need to unlock at least VIP 1 (an account balance of $70 or more) before you can withdraw."
+        );
+      }
 
       const storedWalletAddress = userData.walletAddress ? String(userData.walletAddress).trim() : "";
       if (!storedWalletAddress) {
@@ -1776,12 +1823,40 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const finalUserBalance = Number((newBalance + welcomeBonusAmount).toFixed(2));
 
     const activeTier = getVipTierByBalance(finalUserBalance);
-    const baseVipCapital = activeTier ? activeTier.minCapital : 0;
+
+    // The DEPOSITING user's own VIP Upgrade Bonus: pays only the
+    // incremental capital between the tier they were last credited for
+    // and the new tier just reached -- exactly once per tier, no matter
+    // how many separate deposits it takes to get there.
+    const previousOwnVipId = Number(userData.lastClaimedVipLevel || 0);
+    let ownVipUpgradeBonus = 0;
+    let newOwnVipId = previousOwnVipId;
+    if (activeTier && activeTier.id > previousOwnVipId) {
+      const prevOwnTier = VIP_TIERS.find((t) => t.id === previousOwnVipId);
+      const previousOwnCapital = prevOwnTier ? prevOwnTier.minCapital : 0;
+      const ownCapitalDifference = activeTier.minCapital - previousOwnCapital;
+      if (ownCapitalDifference > 0) {
+        ownVipUpgradeBonus = Number((ownCapitalDifference * rates.vipUpgradeRate).toFixed(2));
+      }
+      newOwnVipId = activeTier.id;
+    }
+    const finalUserBalanceWithOwnBonus = Number((finalUserBalance + ownVipUpgradeBonus).toFixed(2));
+
+    // The REFERRER's bonus is a STRICTLY ONE-TIME payment: it fires only
+    // the very first time this user's balance crosses from below $70 up
+    // to $70 or more (their first-ever VIP unlock), and is calculated on
+    // the FULL capital of whichever tier that first activation reaches.
+    // Once referralBonusPaid is set, no future deposit by this same user
+    // can ever trigger it again -- there is no per-tier tracking here on
+    // purpose, unlike the depositor's own VIP Upgrade Bonus above.
+    const wasActiveBefore = isBalanceActive({ balance: currentBalance });
+    const shouldPayReferral = !wasActiveBefore && !!activeTier && userData.referralBonusPaid !== true;
+    const referralCapitalDifference = shouldPayReferral ? activeTier.minCapital : 0;
 
     let level1Ref = null, level1Doc = null, level1Data = null;
     let level2Ref = null, level2Doc = null, level2Data = null;
 
-    if (baseVipCapital > 0 && userData.referredByUid) {
+    if (shouldPayReferral && userData.referredByUid) {
       level1Ref = db.collection("users").doc(userData.referredByUid);
       level1Doc = await transaction.get(level1Ref);
       if (level1Doc.exists) {
@@ -1796,11 +1871,29 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       }
     }
 
-    transaction.update(userRef, {
-      balance: finalUserBalance,
-      totalBalance: finalUserBalance,
+    const depositUserUpdate = {
+      balance: finalUserBalanceWithOwnBonus,
+      totalBalance: finalUserBalanceWithOwnBonus,
       hasDeposited: true,
-    });
+      lastClaimedVipLevel: newOwnVipId,
+    };
+    if (shouldPayReferral) {
+      depositUserUpdate.referralBonusPaid = true;
+    }
+    transaction.update(userRef, depositUserUpdate);
+
+    if (ownVipUpgradeBonus > 0) {
+      const ownVipBonusTxRef = db.collection("transactions").doc();
+      transaction.set(ownVipBonusTxRef, {
+        transactionId: ownVipBonusTxRef.id,
+        userId: userId,
+        type: "VIP_UPGRADE_BONUS",
+        amount: ownVipUpgradeBonus,
+        status: "approved",
+        title: "VIP " + newOwnVipId + " Upgrade Bonus (" + formatPercent(rates.vipUpgradeRate) + "%)",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
 
     transaction.update(depositDocRef, {
       status: "confirmed",
@@ -1833,8 +1926,8 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       });
     }
 
-    if (level1Doc && level1Doc.exists) {
-      const directBonus = Number((baseVipCapital * rates.directReferralRate).toFixed(2));
+    if (level1Doc && level1Doc.exists && isBalanceActive(level1Data)) {
+      const directBonus = Number((referralCapitalDifference * rates.directReferralRate).toFixed(2));
       const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
 
       transaction.update(level1Ref, {
@@ -1853,34 +1946,34 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
         fromUserId: userId,
         status: "approved",
         title: `Direct Referral Bonus (${formatPercent(rates.directReferralRate)}%)`,
-        baseCapital: baseVipCapital,
+        baseCapital: referralCapitalDifference,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+    }
 
-      if (level2Doc && level2Doc.exists) {
-        const indirectBonus = Number((baseVipCapital * rates.indirectReferralRate).toFixed(2));
-        const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
+    if (level2Doc && level2Doc.exists && isBalanceActive(level2Data)) {
+      const indirectBonus = Number((referralCapitalDifference * rates.indirectReferralRate).toFixed(2));
+      const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
 
-        transaction.update(level2Ref, {
-          balance: level2NewBalance,
-          totalBalance: level2NewBalance,
-          totalEarnings: admin.firestore.FieldValue.increment(indirectBonus),
-          teamReward: admin.firestore.FieldValue.increment(indirectBonus),
-        });
+      transaction.update(level2Ref, {
+        balance: level2NewBalance,
+        totalBalance: level2NewBalance,
+        totalEarnings: admin.firestore.FieldValue.increment(indirectBonus),
+        teamReward: admin.firestore.FieldValue.increment(indirectBonus),
+      });
 
-        const indirectBonusTxRef = db.collection("transactions").doc();
-        transaction.set(indirectBonusTxRef, {
-          transactionId: indirectBonusTxRef.id,
-          userId: level1Data.referredByUid,
-          type: "INDIRECT_REFERRAL_BONUS",
-          amount: indirectBonus,
-          fromUserId: userId,
-          status: "approved",
-          title: `Indirect Referral Bonus (${formatPercent(rates.indirectReferralRate)}%)`,
-          baseCapital: baseVipCapital,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
+      const indirectBonusTxRef = db.collection("transactions").doc();
+      transaction.set(indirectBonusTxRef, {
+        transactionId: indirectBonusTxRef.id,
+        userId: level1Data.referredByUid,
+        type: "INDIRECT_REFERRAL_BONUS",
+        amount: indirectBonus,
+        fromUserId: userId,
+        status: "approved",
+        title: `Indirect Referral Bonus (${formatPercent(rates.indirectReferralRate)}%)`,
+        baseCapital: referralCapitalDifference,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     }
   });
 }
@@ -2046,6 +2139,118 @@ exports.checkPendingDeposits = onSchedule(
     }
   }
 );
+
+exports.cleanupInactiveAccounts = onSchedule(
+  { schedule: "every 24 hours" },
+  async () => {
+    const db = admin.firestore();
+    const cutoffMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    const usersSnap = await db.collection("users").get();
+
+    for (const docSnap of usersSnap.docs) {
+      const data = docSnap.data();
+      if (data.isAdmin === true) continue;
+      if (isBalanceActive(data)) continue;
+
+      const createdMs = getMemberTimestamp(data.createdAt);
+      if (!createdMs) continue;
+      if (createdMs > cutoffMs) continue;
+
+      const uid = docSnap.id;
+      const userRef = docSnap.ref;
+
+      try {
+        for (const sub of ["tasks", "bonuses"]) {
+          const subSnap = await userRef.collection(sub).get();
+          if (!subSnap.empty) {
+            const batch = db.batch();
+            subSnap.forEach((d) => batch.delete(d.ref));
+            await batch.commit();
+          }
+        }
+
+        await userRef.delete();
+
+        try {
+          await admin.auth().deleteUser(uid);
+        } catch (authErr) {
+          console.error("[CLEANUP] Failed to delete Firebase Auth account for " + uid + ":", authErr.message);
+        }
+
+        console.log("[CLEANUP] Deleted inactive account " + uid + " (registered " + new Date(createdMs).toISOString() + ", never reached VIP1).");
+      } catch (err) {
+        console.error("[CLEANUP] Failed to delete user " + uid + ":", err.message);
+      }
+    }
+  }
+);
+
+exports.cleanupInactiveAccounts = onSchedule(
+  { schedule: "every 24 hours" },
+  async () => {
+    const db = admin.firestore();
+    const cutoffMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    const usersSnap = await db.collection("users").get();
+
+    for (const docSnap of usersSnap.docs) {
+      const data = docSnap.data();
+      if (data.isAdmin === true) continue;
+      if (isBalanceActive(data)) continue;
+
+      const createdMs = getMemberTimestamp(data.createdAt);
+      if (!createdMs) continue;
+      if (createdMs > cutoffMs) continue;
+
+      const uid = docSnap.id;
+      const userRef = docSnap.ref;
+
+      try {
+        for (const sub of ["tasks", "bonuses"]) {
+          const subSnap = await userRef.collection(sub).get();
+          if (!subSnap.empty) {
+            const batch = db.batch();
+            subSnap.forEach((d) => batch.delete(d.ref));
+            await batch.commit();
+          }
+        }
+
+        await userRef.delete();
+
+        try {
+          await admin.auth().deleteUser(uid);
+        } catch (authErr) {
+          console.error("[CLEANUP] Failed to delete Firebase Auth account for " + uid + ":", authErr.message);
+        }
+
+        console.log("[CLEANUP] Deleted inactive account " + uid + " (registered " + new Date(createdMs).toISOString() + ", never reached VIP1).");
+      } catch (err) {
+        console.error("[CLEANUP] Failed to delete user " + uid + ":", err.message);
+      }
+    }
+  }
+);
+
+exports.getAccountActivationStatus = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
+  const data = userDoc.data();
+
+  if (isBalanceActive(data)) {
+    return { active: true };
+  }
+
+  const createdMs = getMemberTimestamp(data.createdAt);
+  if (!createdMs) return { active: false, daysRemaining: null };
+
+  const deadlineMs = createdMs + 30 * 24 * 60 * 60 * 1000;
+  const daysRemaining = Math.max(0, Math.ceil((deadlineMs - Date.now()) / (24 * 60 * 60 * 1000)));
+
+  return { active: false, daysRemaining: daysRemaining };
+});
 
 exports.completeTask = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
