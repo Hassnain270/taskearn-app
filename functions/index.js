@@ -500,10 +500,26 @@ exports.resolveLoginIdentifier = onCall(async (request) => {
   }
 });
 
+async function enforceRateLimit(db, key, cooldownMs) {
+  const ref = db.collection("rateLimits").doc(key);
+  const snap = await ref.get();
+  const now = Date.now();
+  if (snap.exists) {
+    const lastCallAt = Number(snap.data().lastCallAt || 0);
+    if (now - lastCallAt < cooldownMs) {
+      throw new HttpsError("resource-exhausted", "Please wait a moment before trying again.");
+    }
+  }
+  await ref.set({ lastCallAt: now }, { merge: true });
+}
+
 exports.checkRegistrationAvailability = onCall(async (request) => {
   const data = request.data || {};
   const username = data.username;
   const email = data.email;
+
+  const rateLimitKey = "reg_" + (email || username || data.phone || "anon");
+  await enforceRateLimit(admin.firestore(), rateLimitKey, 3000);
   const phone = data.phone;
   const referral = data.referral;
   const db = admin.firestore();
@@ -1289,6 +1305,7 @@ exports.requestWithdrawalOtp = onCall(
 
     const userId = request.auth.uid;
     const db = admin.firestore();
+    await enforceRateLimit(db, "withdraw_otp_" + userId, 10000);
 
     const userDoc = await db.collection("users").doc(userId).get();
     if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
@@ -1341,6 +1358,7 @@ exports.requestWithdrawal = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
   const userId = request.auth.uid;
+  await enforceRateLimit(admin.firestore(), "withdraw_" + userId, 10000);
   const data = request.data || {};
   const amount = data.amount;
   const fee = data.fee;
@@ -2259,6 +2277,7 @@ exports.completeTask = onCall(async (request) => {
 
   const userId = request.auth.uid;
   const db = admin.firestore();
+  await enforceRateLimit(db, "task_" + userId, 2000);
   const userRef = db.collection("users").doc(userId);
   const rates = await getBonusRates(db);
 
@@ -2390,6 +2409,7 @@ exports.peekTaskProfit = onCall(async (request) => {
 
   const userId = request.auth.uid;
   const db = admin.firestore();
+  await enforceRateLimit(db, "peek_" + userId, 2000);
   const userRef = db.collection("users").doc(userId);
   const rates = await getBonusRates(db);
 
@@ -2869,6 +2889,7 @@ exports.claimMonthlyReward = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const userId = request.auth.uid;
   const db = admin.firestore();
+  await enforceRateLimit(db, "claim_reward_" + userId, 5000);
 
   const userDoc = await db.collection("users").doc(userId).get();
   if (!userDoc.exists) throw new HttpsError("not-found", "User account not found.");
