@@ -2244,12 +2244,14 @@ exports.getAccountActivationStatus = onCall(async (request) => {
   }
 
   const createdMs = getMemberTimestamp(data.createdAt);
-  if (!createdMs) return { active: false, daysRemaining: null };
+  if (!createdMs) return { active: false, showWarning: false, daysRemaining: null };
 
   const deadlineMs = createdMs + 30 * 24 * 60 * 60 * 1000;
+  const warningStartMs = createdMs + 14 * 24 * 60 * 60 * 1000;
   const daysRemaining = Math.max(0, Math.ceil((deadlineMs - Date.now()) / (24 * 60 * 60 * 1000)));
+  const showWarning = Date.now() >= warningStartMs;
 
-  return { active: false, daysRemaining: daysRemaining };
+  return { active: false, showWarning: showWarning, daysRemaining: daysRemaining };
 });
 
 exports.completeTask = onCall(async (request) => {

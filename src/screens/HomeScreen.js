@@ -185,6 +185,11 @@ export default function HomeScreen({ navigation, route }) {
   const [activePromotion, setActivePromotion] = useState(null);
   const [showPromotionModal, setShowPromotionModal] = useState(false);
 
+  // Shown starting 14 days after registration to any account that has
+  // never unlocked VIP1 -- gives the user a fair heads-up before the
+  // 30-day automatic cleanup, without alarming brand-new users.
+  const [activationWarning, setActivationWarning] = useState(null);
+
   const bannerData = [
     { id: 1, title: "Invite Friends & Team Commission", desc: `Get ${formatPercent(directReferralRate)}% instant commission on Level 1 direct members and ${formatPercent(indirectReferralRate)}% recurring bonus on Level 2 indirect team task completions.`, icon: "account-multiple-plus", color: "#10B981" },
     { id: 2, title: "Daily Task Reward Model", desc: "Complete exactly 5 orders daily to qualify for profit settlement. Higher VIPs unlock bigger profits.", icon: "clipboard-check", color: "#3B82F6" },
@@ -254,6 +259,19 @@ export default function HomeScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
+    const loadActivationStatus = async () => {
+      try {
+        const getStatus = httpsCallable(functionsInstance, 'getAccountActivationStatus');
+        const res = await getStatus();
+        if (res.data && res.data.active === false && res.data.showWarning === true) {
+          setActivationWarning(res.data.daysRemaining);
+        }
+      } catch (err) {
+        // Fetch failed -- silently skip the banner rather than block the screen.
+      }
+    };
+    loadActivationStatus();
+
     const loadPromotion = async () => {
       try {
         const getActivePromotion = httpsCallable(functionsInstance, 'getActivePromotion');
@@ -407,6 +425,17 @@ export default function HomeScreen({ navigation, route }) {
           <View style={styles.statusDot} />
           <Text style={currentStyles.usernameText}>{username}</Text>
         </View>
+
+        {activationWarning !== null && (
+          <View style={styles.activationWarningBox}>
+            <MaterialCommunityIcons name="alert-outline" size={18} color="#EF4444" />
+            <Text style={styles.activationWarningText}>
+              {activationWarning > 0
+                ? 'Unlock a VIP level within ' + activationWarning + ' day' + (activationWarning === 1 ? '' : 's') + ' or your account will be automatically deleted.'
+                : 'Your account is scheduled for automatic deletion very soon -- deposit now to unlock a VIP level and keep it active.'}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.walletCard}>
           <View style={styles.walletCardHeader}>
@@ -667,5 +696,7 @@ const styles = StyleSheet.create({
   promoModalTitle: { fontSize: 17, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
   promoModalMessage: { fontSize: 13, textAlign: 'center', lineHeight: 19, fontWeight: '500', marginBottom: 20 },
   promoModalBtn: { backgroundColor: '#3B82F6', width: '100%', height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  promoModalBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' }
+  promoModalBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  activationWarningBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: '#EF4444', borderRadius: 14, padding: 12, marginBottom: 14 },
+  activationWarningText: { flex: 1, fontSize: 12, color: '#EF4444', fontWeight: '600', lineHeight: 17 }
 });
