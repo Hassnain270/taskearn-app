@@ -366,7 +366,7 @@ export default function AdminUserManagementScreen({ navigation }) {
 
   if (accessChecked && !isAdmin) {
     return (
-      <SafeAreaView style={currentStyles.container}>
+      <SafeAreaView edges={['top']} style={currentStyles.container}>
         <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
         <View style={currentStyles.header}>
           <TouchableOpacity style={currentStyles.backButton} onPress={() => navigation.goBack()}>
@@ -384,7 +384,7 @@ export default function AdminUserManagementScreen({ navigation }) {
   }
 
   return (
-    <SafeAreaView style={currentStyles.container}>
+    <SafeAreaView edges={['top']} style={currentStyles.container}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
 
       <View style={currentStyles.header}>

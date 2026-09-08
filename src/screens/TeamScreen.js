@@ -155,14 +155,14 @@ export default function TeamScreen({ navigation, route }) {
 
   if (loading) {
     return (
-      <SafeAreaView style={[currentStyles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <SafeAreaView edges={['top']} style={[currentStyles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color="#3B82F6" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={currentStyles.container}>
+    <SafeAreaView edges={['top']} style={currentStyles.container}>
       <StatusBar
         barStyle={isDarkMode ? "light-content" : "dark-content"}
         backgroundColor={isDarkMode ? "#0B0E14" : "#FFFFFF"}

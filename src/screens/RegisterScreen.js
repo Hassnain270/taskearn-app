@@ -406,7 +406,7 @@ export default function RegisterScreen({ navigation, route }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
 
       <KeyboardAvoidingView
@@ -585,7 +585,7 @@ export default function RegisterScreen({ navigation, route }) {
       </KeyboardAvoidingView>
 
       <Modal visible={countryModalVisible} animationType="slide" transparent={true}>
-        <SafeAreaView style={styles.modalOverlay}>
+        <SafeAreaView edges={['top']} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             
             <View style={styles.modalHeader}>

@@ -270,7 +270,7 @@ export default function AdminWithdrawalsScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={currentStyles.container}>
+    <SafeAreaView edges={['top']} style={currentStyles.container}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
 
       <View style={currentStyles.header}>

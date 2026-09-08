@@ -191,7 +191,7 @@ export default function PhoneVerifyScreen({ route }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0B0E14" />
       <View style={styles.content}>
         <Text style={styles.title}>Phone Verification</Text>

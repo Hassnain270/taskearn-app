@@ -118,7 +118,7 @@ export default function InvitationScreen({ navigation, route }) {
   };
 
   return (
-    <SafeAreaView style={currentStyles.container}>
+    <SafeAreaView edges={['top']} style={currentStyles.container}>
       <StatusBar
         barStyle={isDarkMode ? "light-content" : "dark-content"}
         backgroundColor={isDarkMode ? "#0B0E14" : "#FFFFFF"}

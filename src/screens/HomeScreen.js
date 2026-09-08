@@ -388,14 +388,14 @@ export default function HomeScreen({ navigation, route }) {
 
   if (loading) {
     return (
-      <SafeAreaView style={[currentStyles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <SafeAreaView edges={['top']} style={[currentStyles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator color="#3B82F6" size="large" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={currentStyles.container}>
+    <SafeAreaView edges={['top']} style={currentStyles.container}>
       <StatusBar backgroundColor={isDarkMode ? "#0B0E14" : "#FFFFFF"} barStyle={isDarkMode ? "light-content" : "dark-content"} />
 
       <View style={currentStyles.header}>
