@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   FlatList,
   ActivityIndicator,
@@ -13,7 +12,7 @@ import {
   Platform
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets  } from 'react-native-safe-area-context';
 import { auth, functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
