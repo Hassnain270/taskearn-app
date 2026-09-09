@@ -1239,7 +1239,7 @@ exports.adminUpdateUserData = onCall(async (request) => {
     let manualVipBonus = 0;
     let newManualVipId = previousManualVipId;
 
-    if (manualTier && manualTier.id > previousManualVipId) {
+    if (manualTier && manualTier.id > previousManualVipId && previousManualVipId > 0) {
       const prevManualTier = VIP_TIERS.find((t) => t.id === previousManualVipId);
       const previousManualCapital = prevManualTier ? prevManualTier.minCapital : 0;
       const manualCapitalDifference = manualTier.minCapital - previousManualCapital;
@@ -1248,6 +1248,8 @@ exports.adminUpdateUserData = onCall(async (request) => {
         const manualRates = await getBonusRates(db);
         manualVipBonus = Number((manualCapitalDifference * manualRates.vipUpgradeRate).toFixed(2));
       }
+      newManualVipId = manualTier.id;
+    } else if (manualTier && manualTier.id > previousManualVipId) {
       newManualVipId = manualTier.id;
     }
 
@@ -1849,13 +1851,15 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const previousOwnVipId = Number(userData.lastClaimedVipLevel || 0);
     let ownVipUpgradeBonus = 0;
     let newOwnVipId = previousOwnVipId;
-    if (activeTier && activeTier.id > previousOwnVipId) {
+    if (activeTier && activeTier.id > previousOwnVipId && previousOwnVipId > 0) {
       const prevOwnTier = VIP_TIERS.find((t) => t.id === previousOwnVipId);
       const previousOwnCapital = prevOwnTier ? prevOwnTier.minCapital : 0;
       const ownCapitalDifference = activeTier.minCapital - previousOwnCapital;
       if (ownCapitalDifference > 0) {
         ownVipUpgradeBonus = Number((ownCapitalDifference * rates.vipUpgradeRate).toFixed(2));
       }
+      newOwnVipId = activeTier.id;
+    } else if (activeTier && activeTier.id > previousOwnVipId) {
       newOwnVipId = activeTier.id;
     }
     const finalUserBalanceWithOwnBonus = Number((finalUserBalance + ownVipUpgradeBonus).toFixed(2));

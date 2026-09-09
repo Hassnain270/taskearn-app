@@ -40,8 +40,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "2a6e130e-2bc2-44b1-8b19-50ed7c794fc2"
+        "projectId": "61760305-2fe3-493d-8f3b-721c4731ca80"
       }
-    }
+    },
+    "owner": "ahmed970"
   }
 }
