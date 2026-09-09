@@ -1105,6 +1105,76 @@ exports.adminGetPlatformStats = onCall(async (request) => {
   };
 });
 
+// Finds accounts that were incorrectly paid a VIP_UPGRADE_BONUS on
+// their very FIRST deposit/VIP unlock (a bug that has since been
+// fixed) -- flagged whenever a user's earliest VIP_UPGRADE_BONUS
+// transaction happened within 2 minutes of their very first DEPOSIT
+// transaction, which is only possible via the old buggy code path.
+// This is READ-ONLY: it reports the affected accounts and the exact
+// amount to deduct, but makes no changes itself, so the admin can
+// review each one before acting.
+exports.adminFindIncorrectVipBonuses = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may run this check.");
+  }
+
+  const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : null;
+
+  const usersSnap = await db.collection("users").get();
+  const flagged = [];
+
+  for (const userDoc of usersSnap.docs) {
+    const uid = userDoc.id;
+    const userData = userDoc.data();
+
+    const depositSnap = await db.collection("transactions")
+      .where("userId", "==", uid)
+      .where("type", "==", "DEPOSIT")
+      .get();
+    if (depositSnap.empty) continue;
+
+    let earliestDepositMs = null;
+    depositSnap.forEach((d) => {
+      const ms = toMillis(d.data().createdAt);
+      if (ms && (earliestDepositMs === null || ms < earliestDepositMs)) earliestDepositMs = ms;
+    });
+    if (!earliestDepositMs) continue;
+
+    const vipBonusSnap = await db.collection("transactions")
+      .where("userId", "==", uid)
+      .where("type", "==", "VIP_UPGRADE_BONUS")
+      .get();
+    if (vipBonusSnap.empty) continue;
+
+    let earliestBonus = null;
+    vipBonusSnap.forEach((d) => {
+      const ms = toMillis(d.data().createdAt);
+      if (ms && (earliestBonus === null || ms < earliestBonus.ms)) {
+        earliestBonus = { ms: ms, amount: Number(d.data().amount || 0), docId: d.id };
+      }
+    });
+    if (!earliestBonus) continue;
+
+    const gapMs = Math.abs(earliestBonus.ms - earliestDepositMs);
+    if (gapMs <= 2 * 60 * 1000) {
+      flagged.push({
+        uid: uid,
+        username: userData.username || null,
+        email: userData.email || null,
+        currentBalance: Number(userData.balance || userData.totalBalance || 0),
+        incorrectBonusAmount: earliestBonus.amount,
+        depositDate: earliestDepositMs,
+        bonusDate: earliestBonus.ms,
+      });
+    }
+  }
+
+  return { success: true, flaggedAccounts: flagged, count: flagged.length };
+});
+
 exports.adminDeleteUser = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
