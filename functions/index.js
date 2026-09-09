@@ -1943,7 +1943,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     // purpose, unlike the depositor's own VIP Upgrade Bonus above.
     const wasActiveBefore = isBalanceActive({ balance: currentBalance });
     const shouldPayReferral = !wasActiveBefore && !!activeTier && userData.referralBonusPaid !== true;
-    const referralCapitalDifference = shouldPayReferral ? activeTier.minCapital : 0;
+    const referralCapitalDifference = shouldPayReferral ? Math.min(depositAmount, activeTier.minCapital) : 0;
 
     let level1Ref = null, level1Doc = null, level1Data = null;
     let level2Ref = null, level2Doc = null, level2Data = null;
