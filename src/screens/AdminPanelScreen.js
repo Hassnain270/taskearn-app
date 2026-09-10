@@ -143,10 +143,11 @@ export default function AdminPanelScreen({ navigation }) {
             <View style={currentStyles.statsDivider} />
 
             <View style={styles.statsRow}>
-              <View style={styles.statsBox}>
+              <TouchableOpacity style={styles.statsBox} onPress={() => navigation.navigate('AdminAllDepositsScreen')}>
                 <Text style={styles.statsLabel}>Total Deposited (All-Time)</Text>
                 <Text style={[styles.statsValue, { color: '#22C55E' }]}>${platformStats.totalDepositedAmount.toFixed(2)}</Text>
-              </View>
+                <Text style={styles.statsTapHint}>Tap to view details</Text>
+              </TouchableOpacity>
               <View style={styles.statsBox}>
                 <Text style={styles.statsLabel}>Total Withdrawn (All-Time)</Text>
                 <Text style={[styles.statsValue, { color: '#EF4444' }]}>${platformStats.totalWithdrawnAmount.toFixed(2)}</Text>
@@ -222,5 +223,6 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', gap: 12 },
   statsBox: { flex: 1 },
   statsLabel: { fontSize: 10, fontWeight: '600', color: '#94A3B8', marginBottom: 4 },
-  statsValue: { fontSize: 18, fontWeight: '800' }
+  statsValue: { fontSize: 18, fontWeight: '800' },
+  statsTapHint: { fontSize: 9, fontWeight: '600', color: '#3B82F6', marginTop: 3 }
 });
