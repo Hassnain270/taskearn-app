@@ -1060,6 +1060,52 @@ exports.adminFixUsername = onCall(async (request) => {
 // every deposit ever confirmed and every withdrawal ever completed --
 // so the admin can see the platform's real financial position at a
 // glance.
+// Returns every DEPOSIT transaction platform-wide (username, amount,
+// timestamp, and their referrer's username) so the admin can review
+// deposit activity across the whole team -- e.g. to spot members who
+// keep depositing unusually small amounts and flag it to their upline.
+// Grouping by day (Today/Yesterday/day name/date) and search are both
+// handled on the frontend from this single list -- the backend just
+// returns the raw, sorted data.
+exports.adminGetAllDeposits = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : null;
+
+  const usersSnap = await db.collection("users").get();
+  const usersByUid = {};
+  usersSnap.forEach((d) => { usersByUid[d.id] = d.data(); });
+
+  const depositSnap = await db.collection("transactions")
+    .where("type", "==", "DEPOSIT")
+    .where("status", "==", "approved")
+    .get();
+
+  const deposits = depositSnap.docs.map((d) => {
+    const data = d.data();
+    const uid = data.userId;
+    const userData = usersByUid[uid] || {};
+    let referrerUsername = null;
+    if (userData.referredByUid && usersByUid[userData.referredByUid]) {
+      referrerUsername = usersByUid[userData.referredByUid].username || null;
+    }
+    return {
+      uid: uid,
+      username: userData.username || uid,
+      amount: Number(data.amount || 0),
+      date: toMillis(data.createdAt),
+      referrerUsername: referrerUsername,
+    };
+  }).sort((a, b) => (b.date || 0) - (a.date || 0));
+
+  return { success: true, deposits: deposits };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
