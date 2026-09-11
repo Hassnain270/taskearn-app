@@ -122,9 +122,18 @@ export default function AdminWithdrawalsScreen({ navigation }) {
   };
 
   const handleApprovePress = (item) => {
+  const message = `Approve withdrawal of ${Number(item.netPayout || item.amount).toFixed(2)} for ${item.username}?\n\nFunds will be sent automatically from the master wallet to their address. This cannot be undone.`;
+
+  if (Platform.OS === 'web') {
+    if (window.confirm("Confirm Approval\n\n" + message)) {
+      performApprove(item.id);
+    }
+    return;
+  }
+
   Alert.alert(
     "Confirm Approval",
-    `Approve withdrawal of $${Number(item.netPayout || item.amount).toFixed(2)} for ${item.username}?\n\nFunds will be sent automatically from the master wallet to their address. This cannot be undone.`,
+    message,
     [
       { text: "Cancel", style: "cancel" },
       { text: "Confirm", onPress: () => performApprove(item.id) }
