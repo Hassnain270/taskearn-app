@@ -1626,7 +1626,7 @@ async function sendTRC20Payout(mnemonic, toAddress, amount) {
   const masterNode = hdwallet.derive(`m/44'/195'/0'/0/0`);
   const masterPrivateKeyHex = masterNode.privateKey.toString("hex");
 
-  const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: masterPrivateKeyHex });
+  const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: masterPrivateKeyHex, headers: { "TRON-PRO-API-KEY": process.env.TRONGRID_API_KEY } });
   const masterAddress = tronWeb.address.fromPrivateKey(masterPrivateKeyHex);
 
   const contract = await tronWeb.contract().at(USDT_TRC20_CONTRACT);
@@ -1649,7 +1649,7 @@ async function sendTRC20Payout(mnemonic, toAddress, amount) {
 }
 
 exports.updateWithdrawalStatus = onCall(
-  { secrets: ["TRON_MNEMONIC"], timeoutSeconds: 120 },
+  { secrets: ["TRON_MNEMONIC", "TRONGRID_API_KEY"], timeoutSeconds: 120 },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
@@ -1880,7 +1880,7 @@ exports.generateDepositAddress = onCall(
       const childNode = hdwallet.derive(`m/44'/195'/0'/0/${assignedIndex}`);
       const privateKeyHex = childNode.privateKey.toString("hex");
 
-      const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io" });
+      const tronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", headers: { "TRON-PRO-API-KEY": process.env.TRONGRID_API_KEY } });
       const newAddress = tronWeb.address.fromPrivateKey(privateKeyHex);
 
       const result = await createPendingDepositRecord(db, userId, "TRC20", newAddress, amount, assignedIndex);
@@ -2118,7 +2118,9 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
 
 async function checkTRC20OnChainServer(address, expectedAmount) {
   try {
-    const response = await fetch(`https://api.trongrid.io/v1/accounts/${address}/transactions/trc20?limit=20`);
+    const response = await fetch(`https://api.trongrid.io/v1/accounts/${address}/transactions/trc20?limit=20`, {
+      headers: { "TRON-PRO-API-KEY": process.env.TRONGRID_API_KEY },
+    });
     const data = await response.json();
     if (!data.data || data.data.length === 0) return null;
 
@@ -2209,8 +2211,8 @@ async function sweepTRC20Deposit(mnemonic, derivationIndex) {
   const masterPrivateKeyHex = masterNode.privateKey.toString("hex");
   const childPrivateKeyHex = childNode.privateKey.toString("hex");
 
-  const masterTronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: masterPrivateKeyHex });
-  const childTronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: childPrivateKeyHex });
+  const masterTronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: masterPrivateKeyHex, headers: { "TRON-PRO-API-KEY": process.env.TRONGRID_API_KEY } });
+  const childTronWeb = new TronWeb({ fullHost: "https://api.trongrid.io", privateKey: childPrivateKeyHex, headers: { "TRON-PRO-API-KEY": process.env.TRONGRID_API_KEY } });
 
   const masterAddress = masterTronWeb.address.fromPrivateKey(masterPrivateKeyHex);
   const childAddress = childTronWeb.address.fromPrivateKey(childPrivateKeyHex);
@@ -2233,7 +2235,7 @@ async function sweepTRC20Deposit(mnemonic, derivationIndex) {
 }
 
 exports.checkPendingDeposits = onSchedule(
-  { schedule: "every 1 minutes", secrets: ["TRON_MNEMONIC"] },
+  { schedule: "every 1 minutes", secrets: ["TRON_MNEMONIC", "TRONGRID_API_KEY"] },
   async () => {
     const db = admin.firestore();
     const mnemonic = process.env.TRON_MNEMONIC;
