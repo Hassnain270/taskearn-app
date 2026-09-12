@@ -2567,22 +2567,45 @@ exports.peekTaskProfit = onCall(async (request) => {
         throw new HttpsError("resource-exhausted", "Daily task limit reached (5/5).");
       }
 
-      if (userData.restrictedTasksMode === true && Math.random() < 0.5) {
-        throw new HttpsError("unavailable", "No orders available right now -- please try again in a moment.");
-      }
-
       let dailyProfitSplits = Array.isArray(userData.dailyProfitSplits) ? userData.dailyProfitSplits : null;
       let splitsBoundary = userData.dailyProfitSplitsBoundary;
+
+      // For a restricted account, a random daily cap (0-5) is decided
+      // ONCE per day, the very first time this is checked that day, and
+      // then persisted -- every later attempt that same day compares
+      // against the SAME stored cap, so once the cap is hit it stays
+      // hit no matter how many times the user retries. A fresh random
+      // cap is only chosen again once a new day begins.
+      let restrictedCap = userData.restrictedTaskCap;
+      let restrictedCapBoundary = userData.restrictedTaskCapBoundary;
+      const needsNewUpdate = {};
+
+      if (userData.restrictedTasksMode === true) {
+        if (restrictedCapBoundary !== dayBoundaryMs) {
+          restrictedCap = Math.floor(Math.random() * 6);
+          restrictedCapBoundary = dayBoundaryMs;
+          needsNewUpdate.restrictedTaskCap = restrictedCap;
+          needsNewUpdate.restrictedTaskCapBoundary = restrictedCapBoundary;
+        }
+
+        if (effectiveTaskCount >= restrictedCap) {
+          if (Object.keys(needsNewUpdate).length > 0) {
+            transaction.update(userRef, needsNewUpdate);
+          }
+          throw new HttpsError("unavailable", "No orders available right now -- please try again tomorrow.");
+        }
+      }
 
       if (!dailyProfitSplits || dailyProfitSplits.length !== 5 || splitsBoundary !== dayBoundaryMs) {
         const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate * 5).toFixed(2));
         dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
         splitsBoundary = dayBoundaryMs;
+        needsNewUpdate.dailyProfitSplits = dailyProfitSplits;
+        needsNewUpdate.dailyProfitSplitsBoundary = splitsBoundary;
+      }
 
-        transaction.update(userRef, {
-          dailyProfitSplits: dailyProfitSplits,
-          dailyProfitSplitsBoundary: splitsBoundary,
-        });
+      if (Object.keys(needsNewUpdate).length > 0) {
+        transaction.update(userRef, needsNewUpdate);
       }
 
       profit = Number(dailyProfitSplits[effectiveTaskCount]) || 0;
