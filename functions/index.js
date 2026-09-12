@@ -2592,7 +2592,7 @@ exports.peekTaskProfit = onCall(async (request) => {
           if (Object.keys(needsNewUpdate).length > 0) {
             transaction.update(userRef, needsNewUpdate);
           }
-          throw new HttpsError("unavailable", "No orders available right now -- please try again tomorrow.");
+          throw new HttpsError("unavailable", "No orders available right now.");
         }
       }
 
