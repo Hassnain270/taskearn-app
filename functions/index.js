@@ -862,6 +862,7 @@ exports.adminGetUserDetail = onCall(async (request) => {
       monthLabel: monthLabel,
       referrerUsername: referrerUsername,
       isAdmin: userData.isAdmin === true,
+      restrictedTasksMode: userData.restrictedTasksMode === true,
     },
   };
 });
@@ -1279,6 +1280,7 @@ exports.adminUpdateUserData = onCall(async (request) => {
   const walletAddress = data.walletAddress;
   const balance = data.balance;
   const balanceReason = data.balanceReason;
+  const restrictedTasksMode = data.restrictedTasksMode;
   if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
 
   const userRef = db.collection("users").doc(uid);
@@ -1287,6 +1289,10 @@ exports.adminUpdateUserData = onCall(async (request) => {
   const currentUserData = userDoc.data();
 
   const updates = {};
+
+  if (typeof restrictedTasksMode === "boolean") {
+    updates.restrictedTasksMode = restrictedTasksMode;
+  }
 
   if (typeof email === "string" && email.trim()) {
     const cleanEmail = email.trim().toLowerCase();
