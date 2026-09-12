@@ -2440,6 +2440,10 @@ exports.completeTask = onCall(async (request) => {
         throw new HttpsError("resource-exhausted", "Daily task limit reached (5/5).");
       }
 
+      if (userData.restrictedTasksMode === true && Math.random() < 0.5) {
+        throw new HttpsError("unavailable", "No orders available right now -- please try again in a moment.");
+      }
+
       if (!dailyProfitSplits || dailyProfitSplits.length !== 5 || splitsBoundary !== dayBoundaryMs) {
         const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate * 5).toFixed(2));
         dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
