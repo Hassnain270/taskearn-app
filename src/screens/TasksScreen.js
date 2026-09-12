@@ -290,14 +290,22 @@ export default function TasksScreen({ navigation }) {
     const animationDelay = new Promise((resolve) => setTimeout(resolve, executionDuration));
     const peekTaskProfit = httpsCallable(functionsInstance, 'peekTaskProfit');
     const profitFetch = peekTaskProfit()
-      .then((res) => (res && res.data && typeof res.data.profit === 'number') ? res.data.profit : null)
-      .catch(() => null);
+      .then((res) => ({ ok: true, profit: (res && res.data && typeof res.data.profit === 'number') ? res.data.profit : null }))
+      .catch((err) => ({ ok: false, error: err }));
 
-    Promise.all([animationDelay, profitFetch]).then(([, peekedProfit]) => {
+    Promise.all([animationDelay, profitFetch]).then(([, fetchResult]) => {
       clearInterval(statusInterval);
+      setIsGrabbing(false);
+
+      if (!fetchResult.ok) {
+        const message = (fetchResult.error && fetchResult.error.message) || 'No orders available right now. Please try again in a moment.';
+        Alert.alert('No Orders Available', message);
+        return;
+      }
+
       setCurrentStepIndex(serverSteps.length - 1);
       const randomProduct = productPool[Math.floor(Math.random() * productPool.length)];
-      const finalProfit = peekedProfit !== null ? peekedProfit : parseFloat((balance * dailyTaskProfitRate * 5).toFixed(2));
+      const finalProfit = fetchResult.profit !== null ? fetchResult.profit : parseFloat((balance * dailyTaskProfitRate * 5).toFixed(2));
       const randomID = Math.floor(100000 + Math.random() * 900000).toString();
 
       setSelectedProduct({
@@ -309,7 +317,6 @@ export default function TasksScreen({ navigation }) {
 
       setCurrentOrderID(randomID);
       setCurrentProfit(finalProfit);
-      setIsGrabbing(false);
       setShowPopup(true);
     });
   };
