@@ -12,7 +12,8 @@ import {
   FlatList,
   Modal,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Switch
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets  } from 'react-native-safe-area-context';
@@ -58,6 +59,7 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [editPhone, setEditPhone] = useState('');
   const [editWallet, setEditWallet] = useState('');
   const [editBalance, setEditBalance] = useState('');
+  const [restrictedTasksMode, setRestrictedTasksMode] = useState(false);
   const [balanceReason, setBalanceReason] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -136,6 +138,7 @@ export default function AdminUserManagementScreen({ navigation }) {
       setEditPhone(detail.phoneNumber || '');
       setEditWallet(detail.walletAddress || '');
       setEditBalance(String(detail.balance ?? '0'));
+      setRestrictedTasksMode(detail.restrictedTasksMode === true);
     } catch (err) {
       showAlert('Error', err.message || 'Failed to load user details.');
       setDetailModalVisible(false);
@@ -148,6 +151,18 @@ export default function AdminUserManagementScreen({ navigation }) {
     setDetailModalVisible(false);
     setSelectedDetail(null);
     setBalanceReason('');
+  };
+
+  const handleToggleRestriction = async (value) => {
+    if (!selectedDetail) return;
+    setRestrictedTasksMode(value);
+    try {
+      const updateFn = httpsCallable(functions, 'adminUpdateUserData');
+      await updateFn({ uid: selectedDetail.uid, restrictedTasksMode: value });
+    } catch (err) {
+      setRestrictedTasksMode(!value);
+      showAlert('Error', err.message || 'Failed to update task restriction.');
+    }
   };
 
   const handleSaveChanges = async () => {
@@ -588,6 +603,16 @@ export default function AdminUserManagementScreen({ navigation }) {
                       )}
 
                       <Text style={styles.usernameNote}>Username cannot be changed, matching the app's own permanent-username rule.</Text>
+
+                      <View style={currentStyles.infoBox}>
+                        <View style={styles.infoRow}>
+                          <View style={{ flex: 1, paddingRight: 10 }}>
+                            <Text style={currentStyles.infoValue}>Restrict Daily Tasks</Text>
+                            <Text style={styles.joiningNote}>Randomly fails ~50% of task attempts. Use for accounts that withdraw more than they contribute without bringing new referrals.</Text>
+                          </View>
+                          <Switch value={restrictedTasksMode} onValueChange={handleToggleRestriction} trackColor={{ true: '#EF4444' }} />
+                        </View>
+                      </View>
 
                       <TouchableOpacity style={styles.saveBtn} onPress={handleSaveChanges} disabled={saving}>
                         {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
