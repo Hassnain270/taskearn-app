@@ -297,7 +297,7 @@ export default function MeScreen({ navigation }) {
           onPress={handleLogout}
         >
           <MaterialCommunityIcons name="logout" size={16} color="#EF4444" style={{ marginRight: 8 }} />
-          <Text style={styles.logoutText}>End Session</Text>
+          <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
 
       </ScrollView>
