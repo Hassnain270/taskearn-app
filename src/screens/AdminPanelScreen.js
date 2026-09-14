@@ -148,10 +148,11 @@ export default function AdminPanelScreen({ navigation }) {
                 <Text style={[styles.statsValue, { color: '#22C55E' }]}>${platformStats.totalDepositedAmount.toFixed(2)}</Text>
                 <Text style={styles.statsTapHint}>Tap to view details</Text>
               </TouchableOpacity>
-              <View style={styles.statsBox}>
+              <TouchableOpacity style={styles.statsBox} onPress={() => navigation.navigate('AdminAllWithdrawalsScreen')}>
                 <Text style={styles.statsLabel}>Total Withdrawn (All-Time)</Text>
                 <Text style={[styles.statsValue, { color: '#EF4444' }]}>${platformStats.totalWithdrawnAmount.toFixed(2)}</Text>
-              </View>
+                <Text style={styles.statsTapHint}>Tap to view details</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
