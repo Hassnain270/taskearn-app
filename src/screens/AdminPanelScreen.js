@@ -5,7 +5,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  StatusBar
+  StatusBar,
+  ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -22,6 +23,9 @@ export default function AdminPanelScreen({ navigation }) {
 
   const [accessChecked, setAccessChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState('current');
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [platformStats, setPlatformStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
 
@@ -43,6 +47,22 @@ export default function AdminPanelScreen({ navigation }) {
     };
     checkAccess();
   }, []);
+
+  useEffect(() => {
+    const loadLeaderboard = async () => {
+      setLeaderboardLoading(true);
+      try {
+        const getTopRecruiters = httpsCallable(functionsInstance, 'adminGetTopRecruiters');
+        const res = await getTopRecruiters({ period: leaderboardPeriod });
+        setLeaderboard((res.data && res.data.leaderboard) || []);
+      } catch (err) {
+        setLeaderboard([]);
+      } finally {
+        setLeaderboardLoading(false);
+      }
+    };
+    loadLeaderboard();
+  }, [leaderboardPeriod]);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -157,6 +177,41 @@ export default function AdminPanelScreen({ navigation }) {
           </View>
         )}
 
+        <View style={currentStyles.statsCard}>
+          <View style={styles.leaderboardHeaderRow}>
+            <Text style={styles.statsCardTitle}>TOP RECRUITERS (ACTIVE REFERRALS)</Text>
+          </View>
+
+          <View style={styles.periodToggleRow}>
+            <TouchableOpacity
+              style={[styles.periodBtn, leaderboardPeriod === 'current' && styles.periodBtnActive]}
+              onPress={() => setLeaderboardPeriod('current')}
+            >
+              <Text style={[styles.periodBtnText, leaderboardPeriod === 'current' && styles.periodBtnTextActive]}>This Month</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.periodBtn, leaderboardPeriod === 'previous' && styles.periodBtnActive]}
+              onPress={() => setLeaderboardPeriod('previous')}
+            >
+              <Text style={[styles.periodBtnText, leaderboardPeriod === 'previous' && styles.periodBtnTextActive]}>Last Month</Text>
+            </TouchableOpacity>
+          </View>
+
+          {leaderboardLoading ? (
+            <ActivityIndicator color="#3B82F6" style={{ marginVertical: 16 }} />
+          ) : leaderboard.length === 0 ? (
+            <Text style={styles.leaderboardEmptyText}>No active referrals joined in this period yet.</Text>
+          ) : (
+            leaderboard.map((entry, idx) => (
+              <View key={entry.uid} style={styles.leaderboardRow}>
+                <Text style={styles.leaderboardRank}>#{idx + 1}</Text>
+                <Text style={currentStyles.leaderboardUsername} numberOfLines={1}>{entry.username}</Text>
+                <Text style={styles.leaderboardCount}>{entry.activeReferralCount} active</Text>
+              </View>
+            ))
+          )}
+        </View>
+
         <View style={currentStyles.optionsGroup}>
           {panelItems.map((item, index) => (
             <React.Fragment key={item.target}>
@@ -196,6 +251,7 @@ const lightStyles = StyleSheet.create({
   optionTitle: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
   divider: { height: 1, backgroundColor: '#F1F5F9', marginLeft: 70 },
   statsCard: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#F1F5F9', padding: 16, marginBottom: 16 },
+  leaderboardUsername: { fontSize: 12, fontWeight: '700', color: '#1E293B', flex: 1 },
   statsDivider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 12 }
 });
 
@@ -210,6 +266,7 @@ const darkStyles = StyleSheet.create({
   optionTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
   divider: { height: 1, backgroundColor: '#21262D', marginLeft: 70 },
   statsCard: { backgroundColor: '#161B22', borderRadius: 16, borderWidth: 1, borderColor: '#21262D', padding: 16, marginBottom: 16 },
+  leaderboardUsername: { fontSize: 12, fontWeight: '700', color: '#FFFFFF', flex: 1 },
   statsDivider: { height: 1, backgroundColor: '#21262D', marginVertical: 12 }
 });
 
@@ -221,6 +278,16 @@ const styles = StyleSheet.create({
   accessDeniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 40 },
   accessDeniedText: { fontSize: 13, color: '#94A3B8', fontWeight: '500', textAlign: 'center' },
   statsCardTitle: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 12 },
+  leaderboardHeaderRow: { marginBottom: 4 },
+  periodToggleRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  periodBtn: { flex: 1, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(148,163,184,0.12)' },
+  periodBtnActive: { backgroundColor: 'rgba(59,130,246,0.15)' },
+  periodBtnText: { fontSize: 11, fontWeight: '700', color: '#94A3B8' },
+  periodBtnTextActive: { color: '#3B82F6' },
+  leaderboardRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 10 },
+  leaderboardRank: { fontSize: 12, fontWeight: '800', color: '#3B82F6', width: 28 },
+  leaderboardCount: { fontSize: 11, fontWeight: '700', color: '#22C55E' },
+  leaderboardEmptyText: { fontSize: 11, color: '#94A3B8', fontWeight: '500', textAlign: 'center', paddingVertical: 12 },
   statsRow: { flexDirection: 'row', gap: 12 },
   statsBox: { flex: 1 },
   statsLabel: { fontSize: 10, fontWeight: '600', color: '#94A3B8', marginBottom: 4 },
