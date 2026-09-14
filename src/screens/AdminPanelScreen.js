@@ -23,9 +23,7 @@ export default function AdminPanelScreen({ navigation }) {
 
   const [accessChecked, setAccessChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [leaderboardPeriod, setLeaderboardPeriod] = useState('current');
-  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
+
   const [platformStats, setPlatformStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
 
@@ -47,22 +45,6 @@ export default function AdminPanelScreen({ navigation }) {
     };
     checkAccess();
   }, []);
-
-  useEffect(() => {
-    const loadLeaderboard = async () => {
-      setLeaderboardLoading(true);
-      try {
-        const getTopRecruiters = httpsCallable(functionsInstance, 'adminGetTopRecruiters');
-        const res = await getTopRecruiters({ period: leaderboardPeriod });
-        setLeaderboard((res.data && res.data.leaderboard) || []);
-      } catch (err) {
-        setLeaderboard([]);
-      } finally {
-        setLeaderboardLoading(false);
-      }
-    };
-    loadLeaderboard();
-  }, [leaderboardPeriod]);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -177,40 +159,10 @@ export default function AdminPanelScreen({ navigation }) {
           </View>
         )}
 
-        <View style={currentStyles.statsCard}>
-          <View style={styles.leaderboardHeaderRow}>
-            <Text style={styles.statsCardTitle}>TOP RECRUITERS (ACTIVE REFERRALS)</Text>
-          </View>
-
-          <View style={styles.periodToggleRow}>
-            <TouchableOpacity
-              style={[styles.periodBtn, leaderboardPeriod === 'current' && styles.periodBtnActive]}
-              onPress={() => setLeaderboardPeriod('current')}
-            >
-              <Text style={[styles.periodBtnText, leaderboardPeriod === 'current' && styles.periodBtnTextActive]}>This Month</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.periodBtn, leaderboardPeriod === 'previous' && styles.periodBtnActive]}
-              onPress={() => setLeaderboardPeriod('previous')}
-            >
-              <Text style={[styles.periodBtnText, leaderboardPeriod === 'previous' && styles.periodBtnTextActive]}>Last Month</Text>
-            </TouchableOpacity>
-          </View>
-
-          {leaderboardLoading ? (
-            <ActivityIndicator color="#3B82F6" style={{ marginVertical: 16 }} />
-          ) : leaderboard.length === 0 ? (
-            <Text style={styles.leaderboardEmptyText}>No active referrals joined in this period yet.</Text>
-          ) : (
-            leaderboard.map((entry, idx) => (
-              <View key={entry.uid} style={styles.leaderboardRow}>
-                <Text style={styles.leaderboardRank}>#{idx + 1}</Text>
-                <Text style={currentStyles.leaderboardUsername} numberOfLines={1}>{entry.username}</Text>
-                <Text style={styles.leaderboardCount}>{entry.activeReferralCount} active</Text>
-              </View>
-            ))
-          )}
-        </View>
+        <TouchableOpacity style={currentStyles.statsCard} onPress={() => navigation.navigate('AdminTopRecruitersScreen')}>
+          <Text style={styles.statsCardTitle}>TOP RECRUITERS (ACTIVE REFERRALS)</Text>
+          <Text style={styles.leaderboardEmptyText}>View any month's leaderboard of top team builders</Text>
+        </TouchableOpacity>
 
         <View style={currentStyles.optionsGroup}>
           {panelItems.map((item, index) => (
