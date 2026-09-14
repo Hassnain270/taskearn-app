@@ -4,14 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   SectionList,
   TextInput
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db, functions } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -50,6 +49,20 @@ function getDayLabel(ms) {
     return monthLabel + ', ' + d.getUTCFullYear();
   }
   return monthLabel;
+}
+
+// Same 16:00 UTC shift, but grouped down to a year+month key instead of
+// a full day, so a Monthly Summary card can total up "this month" vs
+// "last month" using the same app-day boundary as everywhere else.
+function getMonthKey(ms) {
+  const shifted = new Date(ms - 16 * 60 * 60 * 1000);
+  return shifted.getUTCFullYear() * 100 + shifted.getUTCMonth();
+}
+
+function getMonthLabel(monthKey) {
+  const year = Math.floor(monthKey / 100);
+  const month = monthKey % 100;
+  return MONTH_ABBR[month] + ' ' + year;
 }
 
 export default function AdminAllDepositsScreen({ navigation }) {
@@ -99,6 +112,29 @@ export default function AdminAllDepositsScreen({ navigation }) {
     return deposits.filter((d) => (d.username || '').toLowerCase().includes(cleanQuery));
   }, [deposits, searchQuery]);
 
+  const monthlySummary = useMemo(() => {
+    const currentMonthKey = getMonthKey(Date.now());
+    const previousMonthKey = (currentMonthKey % 100 === 0)
+      ? (currentMonthKey - 100 + 11)
+      : (currentMonthKey - 1);
+
+    let currentTotal = 0;
+    let previousTotal = 0;
+    deposits.forEach((d) => {
+      if (!d.date) return;
+      const key = getMonthKey(d.date);
+      if (key === currentMonthKey) currentTotal += d.amount;
+      else if (key === previousMonthKey) previousTotal += d.amount;
+    });
+
+    return {
+      currentLabel: getMonthLabel(currentMonthKey),
+      previousLabel: getMonthLabel(previousMonthKey),
+      currentTotal: currentTotal,
+      previousTotal: previousTotal,
+    };
+  }, [deposits]);
+
   const sections = useMemo(() => {
     const grouped = {};
     const order = [];
@@ -144,7 +180,7 @@ export default function AdminAllDepositsScreen({ navigation }) {
 
   if (accessChecked && !isAdmin) {
     return (
-      <SafeAreaView style={currentStyles.container}>
+      <SafeAreaView style={currentStyles.container} edges={['top']}>
         <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
         <View style={currentStyles.header}>
           <TouchableOpacity style={currentStyles.backButton} onPress={() => navigation.goBack()}>
@@ -171,6 +207,19 @@ export default function AdminAllDepositsScreen({ navigation }) {
         </TouchableOpacity>
         <Text style={currentStyles.headerTitle}>All Deposits</Text>
         <View style={{ width: 36 }} />
+      </View>
+
+      <View style={currentStyles.summaryCard}>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryBox}>
+            <Text style={styles.summaryLabel}>{monthlySummary.currentLabel}</Text>
+            <Text style={[styles.summaryValue, { color: '#22C55E' }]}>${monthlySummary.currentTotal.toFixed(2)}</Text>
+          </View>
+          <View style={styles.summaryBox}>
+            <Text style={styles.summaryLabel}>{monthlySummary.previousLabel}</Text>
+            <Text style={[styles.summaryValue, { color: '#94A3B8' }]}>${monthlySummary.previousTotal.toFixed(2)}</Text>
+          </View>
+        </View>
       </View>
 
       <View style={styles.searchSection}>
@@ -223,6 +272,7 @@ const lightStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#1E293B' },
+  summaryCard: { backgroundColor: '#FFFFFF', borderRadius: 14, marginHorizontal: 16, marginTop: 12, padding: 14, borderWidth: 1, borderColor: '#F1F5F9' },
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', gap: 8 },
   searchInput: { flex: 1, fontSize: 13, color: '#1E293B' },
   depositCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#F1F5F9' },
@@ -236,6 +286,7 @@ const darkStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#161B22', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  summaryCard: { backgroundColor: '#161B22', borderRadius: 14, marginHorizontal: 16, marginTop: 12, padding: 14, borderWidth: 1, borderColor: '#21262D' },
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#21262D', gap: 8 },
   searchInput: { flex: 1, fontSize: 13, color: '#FFFFFF' },
   depositCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#161B22', borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#21262D' },
@@ -246,6 +297,10 @@ const darkStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   searchSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  summaryRow: { flexDirection: 'row', gap: 12 },
+  summaryBox: { flex: 1, alignItems: 'center' },
+  summaryLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 4 },
+  summaryValue: { fontSize: 16, fontWeight: '800' },
   loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
   emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500', textAlign: 'center', paddingHorizontal: 30 },
   listContainer: { paddingHorizontal: 16, paddingTop: 8 },

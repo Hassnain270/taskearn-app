@@ -19,8 +19,6 @@ import { ThemeContext } from '../../ThemeContext';
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// The app's day cycle resets at 9 PM Pakistan time (= 16:00 UTC), the
-// same boundary used everywhere else in the app.
 function getCycleDayKey(ms) {
   const shifted = new Date(ms - 16 * 60 * 60 * 1000);
   return Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
@@ -47,6 +45,17 @@ function getDayLabel(ms) {
     return monthLabel + ', ' + d.getUTCFullYear();
   }
   return monthLabel;
+}
+
+function getMonthKey(ms) {
+  const shifted = new Date(ms - 16 * 60 * 60 * 1000);
+  return shifted.getUTCFullYear() * 100 + shifted.getUTCMonth();
+}
+
+function getMonthLabel(monthKey) {
+  const year = Math.floor(monthKey / 100);
+  const month = monthKey % 100;
+  return MONTH_ABBR[month] + ' ' + year;
 }
 
 export default function AdminAllWithdrawalsScreen({ navigation }) {
@@ -95,6 +104,29 @@ export default function AdminAllWithdrawalsScreen({ navigation }) {
     if (!cleanQuery) return withdrawals;
     return withdrawals.filter((w) => (w.username || '').toLowerCase().includes(cleanQuery));
   }, [withdrawals, searchQuery]);
+
+  const monthlySummary = useMemo(() => {
+    const currentMonthKey = getMonthKey(Date.now());
+    const previousMonthKey = (currentMonthKey % 100 === 0)
+      ? (currentMonthKey - 100 + 11)
+      : (currentMonthKey - 1);
+
+    let currentTotal = 0;
+    let previousTotal = 0;
+    withdrawals.forEach((w) => {
+      if (!w.date) return;
+      const key = getMonthKey(w.date);
+      if (key === currentMonthKey) currentTotal += w.amount;
+      else if (key === previousMonthKey) previousTotal += w.amount;
+    });
+
+    return {
+      currentLabel: getMonthLabel(currentMonthKey),
+      previousLabel: getMonthLabel(previousMonthKey),
+      currentTotal: currentTotal,
+      previousTotal: previousTotal,
+    };
+  }, [withdrawals]);
 
   const sections = useMemo(() => {
     const grouped = {};
@@ -167,6 +199,19 @@ export default function AdminAllWithdrawalsScreen({ navigation }) {
         <View style={{ width: 36 }} />
       </View>
 
+      <View style={currentStyles.summaryCard}>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryBox}>
+            <Text style={styles.summaryLabel}>{monthlySummary.currentLabel}</Text>
+            <Text style={[styles.summaryValue, { color: '#EF4444' }]}>${monthlySummary.currentTotal.toFixed(2)}</Text>
+          </View>
+          <View style={styles.summaryBox}>
+            <Text style={styles.summaryLabel}>{monthlySummary.previousLabel}</Text>
+            <Text style={[styles.summaryValue, { color: '#94A3B8' }]}>${monthlySummary.previousTotal.toFixed(2)}</Text>
+          </View>
+        </View>
+      </View>
+
       <View style={styles.searchSection}>
         <View style={currentStyles.searchWrapper}>
           <Feather name="search" size={16} color={isDarkMode ? "#8B949E" : "#94A3B8"} />
@@ -217,6 +262,7 @@ const lightStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#1E293B' },
+  summaryCard: { backgroundColor: '#FFFFFF', borderRadius: 14, marginHorizontal: 16, marginTop: 12, padding: 14, borderWidth: 1, borderColor: '#F1F5F9' },
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', gap: 8 },
   searchInput: { flex: 1, fontSize: 13, color: '#1E293B' },
   itemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#F1F5F9' },
@@ -230,6 +276,7 @@ const darkStyles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#21262D' },
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#161B22', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
+  summaryCard: { backgroundColor: '#161B22', borderRadius: 14, marginHorizontal: 16, marginTop: 12, padding: 14, borderWidth: 1, borderColor: '#21262D' },
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#21262D', gap: 8 },
   searchInput: { flex: 1, fontSize: 13, color: '#FFFFFF' },
   itemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#161B22', borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#21262D' },
@@ -240,6 +287,10 @@ const darkStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   searchSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  summaryRow: { flexDirection: 'row', gap: 12 },
+  summaryBox: { flex: 1, alignItems: 'center' },
+  summaryLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 4 },
+  summaryValue: { fontSize: 16, fontWeight: '800' },
   loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
   emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500', textAlign: 'center', paddingHorizontal: 30 },
   listContainer: { paddingHorizontal: 16, paddingTop: 8 },
