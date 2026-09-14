@@ -1882,6 +1882,7 @@ exports.updateWithdrawalStatus = onCall(
           transaction.update(linkedTxRef, {
             status: "approved",
             title: "Withdrawal Completed",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         } else {
           const completedTxRef = db.collection("transactions").doc();
