@@ -1870,6 +1870,7 @@ exports.updateWithdrawalStatus = onCall(
         transaction.update(withdrawalRef, {
           status: "completed",
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          completedAt: admin.firestore.FieldValue.serverTimestamp(),
           confirmedTxHash: confirmedTxHash,
         });
 
