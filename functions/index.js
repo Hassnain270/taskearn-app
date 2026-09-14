@@ -643,6 +643,8 @@ exports.calculateTeamStats = onCall(async (request) => {
 
     let globalTodayCount = 0;
     let globalMonthCount = 0;
+    let globalActiveCount = 0;
+    let globalInactiveCount = 0;
 
     const calculateSubTree = (refCode) => {
       const children = allUsers.filter((u) => u.referredBy === refCode);
@@ -652,6 +654,7 @@ exports.calculateTeamStats = onCall(async (request) => {
         const cTime = getMemberTimestamp(c.createdAt);
         if (cTime >= dayResetUtcMs) globalTodayCount++;
         if (cTime >= monthResetUtcMs) globalMonthCount++;
+        if (isBalanceActive(c)) globalActiveCount++; else globalInactiveCount++;
 
         const childCode = c.referralCode || c.referral || c.id.substring(0, 6).toUpperCase();
         count += calculateSubTree(childCode);
@@ -667,6 +670,7 @@ exports.calculateTeamStats = onCall(async (request) => {
       const dTime = getMemberTimestamp(d.createdAt);
       if (dTime >= dayResetUtcMs) globalTodayCount++;
       if (dTime >= monthResetUtcMs) globalMonthCount++;
+      if (isBalanceActive(d)) globalActiveCount++; else globalInactiveCount++;
 
       const childCode = d.referralCode || d.referral || d.id.substring(0, 6).toUpperCase();
       const subTreeCount = calculateSubTree(childCode);
@@ -684,6 +688,8 @@ exports.calculateTeamStats = onCall(async (request) => {
       success: true,
       username: userData.username || "",
       totalTeamSize: totalNetworkCount,
+      totalActiveTeamMembers: globalActiveCount,
+      totalInactiveTeamMembers: globalInactiveCount,
       todayJoinings: globalTodayCount,
       monthlyJoinings: globalMonthCount,
       monthLabel: monthLabel,
