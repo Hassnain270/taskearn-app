@@ -1138,6 +1138,42 @@ exports.adminGetAllDeposits = onCall(async (request) => {
   return { success: true, deposits: deposits };
 });
 
+// Same as adminGetAllDeposits, but for completed withdrawals -- so the
+// admin can review who has withdrawn, how much, and when, the same way
+// deposits are reviewed.
+exports.adminGetAllWithdrawals = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : null;
+
+  const usersSnap = await db.collection("users").get();
+  const usersByUid = {};
+  usersSnap.forEach((d) => { usersByUid[d.id] = d.data(); });
+
+  const withdrawalSnap = await db.collection("withdrawals")
+    .where("status", "==", "completed")
+    .get();
+
+  const withdrawals = withdrawalSnap.docs.map((d) => {
+    const data = d.data();
+    const uid = data.userId;
+    const userData = usersByUid[uid] || {};
+    return {
+      uid: uid,
+      username: data.username || userData.username || uid,
+      amount: Number(data.netPayout || data.amount || 0),
+      date: toMillis(data.createdAt),
+    };
+  }).sort((a, b) => (b.date || 0) - (a.date || 0));
+
+  return { success: true, withdrawals: withdrawals };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
