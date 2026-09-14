@@ -1174,6 +1174,60 @@ exports.adminGetAllWithdrawals = onCall(async (request) => {
   return { success: true, withdrawals: withdrawals };
 });
 
+// Ranks users by how many of their ACTIVE direct referrals joined in
+// a given month (current or previous) -- a "Top Recruiter" leaderboard
+// so the admin can identify and reward the most productive team
+// builders each month.
+exports.adminGetTopRecruiters = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const period = (request.data && request.data.period) || "current";
+
+  const boundaries = getPktResetBoundaries();
+  let periodStartMs = boundaries.monthResetUtcMs;
+  let periodEndMs = Date.now();
+
+  if (period === "previous") {
+    const currentMonthStart = new Date(boundaries.monthResetUtcMs);
+    const prevMonthStart = new Date(Date.UTC(currentMonthStart.getUTCFullYear(), currentMonthStart.getUTCMonth() - 1, currentMonthStart.getUTCDate(), currentMonthStart.getUTCHours(), currentMonthStart.getUTCMinutes(), currentMonthStart.getUTCSeconds()));
+    periodStartMs = prevMonthStart.getTime();
+    periodEndMs = boundaries.monthResetUtcMs;
+  }
+
+  const usersSnap = await db.collection("users").get();
+  const allUsers = usersSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+  const countsByReferrer = {};
+
+  allUsers.forEach((u) => {
+    if (!u.referredByUid) return;
+    if (!isBalanceActive(u)) return;
+    const joinMs = getMemberTimestamp(u.createdAt);
+    if (joinMs < periodStartMs || joinMs >= periodEndMs) return;
+
+    countsByReferrer[u.referredByUid] = (countsByReferrer[u.referredByUid] || 0) + 1;
+  });
+
+  const usersByUid = {};
+  allUsers.forEach((u) => { usersByUid[u.id] = u; });
+
+  const leaderboard = Object.keys(countsByReferrer)
+    .map((uid) => ({
+      uid: uid,
+      username: (usersByUid[uid] && usersByUid[uid].username) || uid,
+      activeReferralCount: countsByReferrer[uid],
+    }))
+    .sort((a, b) => b.activeReferralCount - a.activeReferralCount)
+    .slice(0, 10);
+
+  return { success: true, leaderboard: leaderboard, period: period };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
