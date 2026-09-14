@@ -7,6 +7,7 @@ import {
   ScrollView,
   StatusBar,
   ActivityIndicator,
+  Animated,
   Platform,
   Alert,
   Image
@@ -54,6 +55,16 @@ export default function TasksScreen({ navigation }) {
   const [dailyTaskProfitRate, setDailyTaskProfitRate] = useState(0.0032);
 
   const cycleKeyRef = useRef(null);
+
+  // Pulse + ripple loading animation values, shown in place of a plain
+  // spinner while an order is being processed -- logoScale/logoOpacity
+  // pulse the app icon itself, and ripple1/ripple2 expand outward from
+  // behind it on a staggered loop for a premium, brand-consistent feel.
+  const logoScale = useRef(new Animated.Value(1)).current;
+  const logoOpacity = useRef(new Animated.Value(1)).current;
+  const ripple1 = useRef(new Animated.Value(0)).current;
+  const ripple2 = useRef(new Animated.Value(0)).current;
+  const loadingAnimationRef = useRef(null);
 
   // Local activity storage is scoped per user UID, tracked as REACTIVE
   // state via onAuthStateChanged rather than read once at render time.
@@ -265,6 +276,53 @@ export default function TasksScreen({ navigation }) {
     return () => clearInterval(timerInterval);
   }, [authUid]);
 
+  useEffect(() => {
+    if (!isGrabbing) {
+      if (loadingAnimationRef.current) {
+        loadingAnimationRef.current.stop();
+        loadingAnimationRef.current = null;
+      }
+      logoScale.setValue(1);
+      logoOpacity.setValue(1);
+      ripple1.setValue(0);
+      ripple2.setValue(0);
+      return;
+    }
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(logoScale, { toValue: 1.12, duration: 700, useNativeDriver: true }),
+          Animated.timing(logoOpacity, { toValue: 0.85, duration: 700, useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(logoScale, { toValue: 1, duration: 700, useNativeDriver: true }),
+          Animated.timing(logoOpacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        ]),
+      ])
+    );
+
+    const rippleLoop = (animValue, delay) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(animValue, { toValue: 1, duration: 1600, useNativeDriver: true }),
+          Animated.timing(animValue, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ])
+      );
+
+    const combined = Animated.parallel([pulseLoop, rippleLoop(ripple1, 0), rippleLoop(ripple2, 800)]);
+    loadingAnimationRef.current = combined;
+    combined.start();
+
+    return () => {
+      if (loadingAnimationRef.current) {
+        loadingAnimationRef.current.stop();
+        loadingAnimationRef.current = null;
+      }
+    };
+  }, [isGrabbing]);
+
   const handleGrabOrder = () => {
     if (effectiveTaskCount >= 5) return;
 
@@ -418,7 +476,35 @@ export default function TasksScreen({ navigation }) {
           <View style={currentStyles.workCard}>
             {isGrabbing ? (
               <View style={styles.processingWrapper}>
-                <ActivityIndicator size="large" color="#3B82F6" />
+                <View style={styles.rippleContainer}>
+                  <Animated.View
+                    style={[
+                      styles.rippleRing,
+                      {
+                        opacity: ripple1.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+                        transform: [{ scale: ripple1.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] }) }],
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.rippleRing,
+                      {
+                        opacity: ripple2.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+                        transform: [{ scale: ripple2.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] }) }],
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.loadingLogoCircle,
+                      { backgroundColor: isDarkMode ? "#1E293B" : "#EFF6FF" },
+                      { transform: [{ scale: logoScale }], opacity: logoOpacity },
+                    ]}
+                  >
+                    <Image source={require('../../assets/icon.png')} style={styles.workLogo} resizeMode="contain" />
+                  </Animated.View>
+                </View>
                 <View style={styles.stepsList}>
                   {serverSteps.map((step, idx) => (
                     <View key={idx} style={styles.stepRow}>
@@ -660,6 +746,9 @@ const styles = StyleSheet.create({
   disabledBtn: { backgroundColor: '#94A3B8', shadowOpacity: 0 },
   grabBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: 'bold' },
   processingWrapper: { width: '100%', alignItems: 'center', justifyContent: 'center' },
+  rippleContainer: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center' },
+  rippleRing: { position: 'absolute', width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: '#3B82F6' },
+  loadingLogoCircle: { width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center' },
   stepsList: { width: '100%', marginTop: 20, gap: 12 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   stepDot: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center' },
