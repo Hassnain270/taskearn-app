@@ -29,6 +29,8 @@ export default function TeamScreen({ navigation, route }) {
 
   const [directMembersData, setDirectMembersData] = useState([]);
   const [totalTeamSize, setTotalTeamSize] = useState(0);
+  const [totalActiveTeamMembers, setTotalActiveTeamMembers] = useState(0);
+  const [totalInactiveTeamMembers, setTotalInactiveTeamMembers] = useState(0);
   const [todayJoinings, setTodayJoinings] = useState(0);
   const [monthlyJoinings, setMonthlyJoinings] = useState(0);
   const [monthLabel, setMonthLabel] = useState("");
@@ -56,9 +58,11 @@ export default function TeamScreen({ navigation, route }) {
         const result = await calculateStats();
 
         if (result.data) {
-          const { totalTeamSize, todayJoinings, monthlyJoinings, monthLabel, directMembersData, referralCode, balance, username } = result.data;
+          const { totalTeamSize, totalActiveTeamMembers, totalInactiveTeamMembers, todayJoinings, monthlyJoinings, monthLabel, directMembersData, referralCode, balance, username } = result.data;
 
           setTotalTeamSize(totalTeamSize || 0);
+          setTotalActiveTeamMembers(totalActiveTeamMembers || 0);
+          setTotalInactiveTeamMembers(totalInactiveTeamMembers || 0);
           setTodayJoinings(todayJoinings || 0);
           setMonthlyJoinings(monthlyJoinings || 0);
           if (monthLabel) setMonthLabel(monthLabel);
@@ -186,6 +190,7 @@ export default function TeamScreen({ navigation, route }) {
         <View style={styles.mainStatsCard}>
           <Text style={styles.mainStatsLabel}>TOTAL TEAM SIZE</Text>
           <Text style={styles.mainStatsValue}>{totalTeamSize}</Text>
+          <Text style={styles.mainStatsSubBreakdown}>({totalActiveTeamMembers} Active, {totalInactiveTeamMembers} Inactive)</Text>
           <View style={styles.mainStatsDivider} />
           <View style={styles.mainStatsRow}>
             <View style={styles.subStatBox}>
@@ -393,6 +398,7 @@ const styles = StyleSheet.create({
   mainStatsCard: { backgroundColor: '#3B82F6', borderRadius: 20, padding: 20, marginTop: 16, marginBottom: 12 },
   mainStatsLabel: { color: 'rgba(255, 255, 255, 0.75)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5, textAlign: 'center' },
   mainStatsValue: { color: '#FFFFFF', fontSize: 36, fontWeight: 'bold', textAlign: 'center', marginTop: 4 },
+  mainStatsSubBreakdown: { color: 'rgba(255, 255, 255, 0.75)', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 2 },
   mainStatsDivider: { height: 1, backgroundColor: 'rgba(255, 255, 255, 0.2)', marginVertical: 14 },
   mainStatsRow: { flexDirection: 'row' },
   subStatBox: { flex: 1, alignItems: 'center' },
