@@ -973,6 +973,31 @@ exports.adminMigrateTeamMembers = onCall(async (request) => {
       continue;
     }
 
+    // Guard against creating a circular referral chain: walk UP from
+    // the destination account's own upline, and if this member ever
+    // appears in that chain, the destination is actually a DESCENDANT
+    // of this member -- moving them would make the member their own
+    // downline's downline, an infinite loop that breaks team-size
+    // calculations everywhere.
+    let isCircular = false;
+    let walkUid = newUserData.referredByUid || null;
+    let safetyCounter = 0;
+    while (walkUid && safetyCounter < 50) {
+      if (walkUid === memberDoc.id) {
+        isCircular = true;
+        break;
+      }
+      const walkDoc = await db.collection("users").doc(walkUid).get();
+      if (!walkDoc.exists) break;
+      walkUid = walkDoc.data().referredByUid || null;
+      safetyCounter++;
+    }
+
+    if (isCircular) {
+      results.push({ username: rawUsername, status: "blocked_circular_reference" });
+      continue;
+    }
+
     batch.update(memberDoc.ref, {
       referredByUid: newUid,
       referredBy: newReferralCode,
