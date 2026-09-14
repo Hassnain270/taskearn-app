@@ -1186,18 +1186,18 @@ exports.adminGetTopRecruiters = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Only administrators may view this.");
   }
 
-  const period = (request.data && request.data.period) || "current";
+  // Any calendar month/year the admin picks -- boundaries use the same
+  // "1st of the month, 9 PM Pakistan time (16:00 UTC)" rule as every
+  // other day/month boundary in the app, computed directly instead of
+  // via an offset from "now" (which was drifting and double-counting
+  // some members across both the current and previous month).
+  const now = new Date();
+  const requestedYear = (request.data && Number.isInteger(request.data.year)) ? request.data.year : now.getUTCFullYear();
+  const requestedMonth = (request.data && Number.isInteger(request.data.month)) ? request.data.month - 1 : now.getUTCMonth();
 
-  const boundaries = getPktResetBoundaries();
-  let periodStartMs = boundaries.monthResetUtcMs;
-  let periodEndMs = Date.now();
-
-  if (period === "previous") {
-    const currentMonthStart = new Date(boundaries.monthResetUtcMs);
-    const prevMonthStart = new Date(Date.UTC(currentMonthStart.getUTCFullYear(), currentMonthStart.getUTCMonth() - 1, currentMonthStart.getUTCDate(), currentMonthStart.getUTCHours(), currentMonthStart.getUTCMinutes(), currentMonthStart.getUTCSeconds()));
-    periodStartMs = prevMonthStart.getTime();
-    periodEndMs = boundaries.monthResetUtcMs;
-  }
+  const periodStartMs = Date.UTC(requestedYear, requestedMonth, 1, 16, 0, 0);
+  const periodEndMs = Date.UTC(requestedYear, requestedMonth + 1, 1, 16, 0, 0);
+  const periodLabel = MONTH_ABBR[requestedMonth] + " " + requestedYear;
 
   const usersSnap = await db.collection("users").get();
   const allUsers = usersSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
@@ -1225,7 +1225,7 @@ exports.adminGetTopRecruiters = onCall(async (request) => {
     .sort((a, b) => b.activeReferralCount - a.activeReferralCount)
     .slice(0, 10);
 
-  return { success: true, leaderboard: leaderboard, period: period };
+  return { success: true, leaderboard: leaderboard, periodLabel: periodLabel };
 });
 
 exports.adminGetPlatformStats = onCall(async (request) => {
