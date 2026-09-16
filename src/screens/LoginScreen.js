@@ -176,7 +176,7 @@ export default function LoginScreen({ navigation }) {
 
     } catch (error) {
       setIsLoading(false);
-      showAlert("Login Failed", error.message || "Invalid username or password");
+      showAlert("Login Failed", "Invalid username or password");
     }
   };
 
