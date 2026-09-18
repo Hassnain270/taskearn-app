@@ -2119,22 +2119,29 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const depositAmount = Number(amount);
     const newBalance = Number((currentBalance + depositAmount).toFixed(2));
 
+    const VIP_CAPITAL_DEPOSIT_CAP = 300;
+    const currentVipCapital = (typeof userData.vipCapital === "number") ? userData.vipCapital : currentBalance;
+    const vipCapitalRoom = Math.max(0, VIP_CAPITAL_DEPOSIT_CAP - currentVipCapital);
+    const depositAppliedToVipCapital = Math.min(depositAmount, vipCapitalRoom);
+    const newVipCapitalBeforeBonus = Number((currentVipCapital + depositAppliedToVipCapital).toFixed(2));
+
     const isFirstDeposit = !userData.hasDeposited;
     const alreadyDisqualified = userData.firstDepositFailed === true;
     let welcomeBonusAmount = 0;
     let newlyDisqualified = false;
 
-    if (isFirstDeposit && depositAmount < 70) {
+    if (isFirstDeposit && (currentVipCapital + depositAppliedToVipCapital) < 70) {
       newlyDisqualified = true;
     } else if (isFirstDeposit && !alreadyDisqualified) {
-      welcomeBonusAmount = Number((depositAmount * rates.welcomeBonusRate).toFixed(2));
+      welcomeBonusAmount = Number((depositAppliedToVipCapital * rates.welcomeBonusRate).toFixed(2));
     }
 
     const isDisqualified = alreadyDisqualified || newlyDisqualified;
 
     const finalUserBalance = Number((newBalance + welcomeBonusAmount).toFixed(2));
+    const finalVipCapital = Number((newVipCapitalBeforeBonus + welcomeBonusAmount).toFixed(2));
 
-    const activeTier = getVipTierByBalance(finalUserBalance);
+    const activeTier = getVipTierByBalance(finalVipCapital);
 
     // The DEPOSITING user's own VIP Upgrade Bonus: pays only the
     // incremental capital between the tier they were last credited for
@@ -2155,6 +2162,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       newOwnVipId = activeTier.id;
     }
     const finalUserBalanceWithOwnBonus = Number((finalUserBalance + ownVipUpgradeBonus).toFixed(2));
+    const finalVipCapitalWithOwnBonus = Number((finalVipCapital + ownVipUpgradeBonus).toFixed(2));
 
     // The REFERRER's bonus is a STRICTLY ONE-TIME payment: it fires only
     // the very first time this user's balance crosses from below $70 up
@@ -2163,9 +2171,9 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     // Once referralBonusPaid is set, no future deposit by this same user
     // can ever trigger it again -- there is no per-tier tracking here on
     // purpose, unlike the depositor's own VIP Upgrade Bonus above.
-    const wasActiveBefore = isBalanceActive({ balance: currentBalance });
+    const wasActiveBefore = isBalanceActive({ balance: currentVipCapital });
     const shouldPayReferral = !wasActiveBefore && !!activeTier && userData.referralBonusPaid !== true && !isDisqualified;
-    const referralCapitalDifference = shouldPayReferral ? Math.min(depositAmount, activeTier.minCapital) : 0;
+    const referralCapitalDifference = shouldPayReferral ? Math.min(depositAppliedToVipCapital, activeTier.minCapital) : 0;
 
     let level1Ref = null, level1Doc = null, level1Data = null;
     let level2Ref = null, level2Doc = null, level2Data = null;
@@ -2188,6 +2196,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const depositUserUpdate = {
       balance: finalUserBalanceWithOwnBonus,
       totalBalance: finalUserBalanceWithOwnBonus,
+      vipCapital: finalVipCapitalWithOwnBonus,
       hasDeposited: true,
       lastClaimedVipLevel: newOwnVipId,
     };
@@ -2591,9 +2600,10 @@ exports.completeTask = onCall(async (request) => {
 
       const userData = userDoc.data();
       let currentBalance = Number(userData.balance || 0);
+      let currentVipCapital = (typeof userData.vipCapital === "number") ? userData.vipCapital : currentBalance;
 
-      if (currentBalance < 70) {
-        throw new HttpsError("failed-precondition", "Minimum $70 balance required to perform tasks.");
+      if (currentVipCapital < 70) {
+        throw new HttpsError("failed-precondition", "Minimum $70 working capital required to perform tasks.");
       }
 
       const now = new Date();
@@ -2620,19 +2630,20 @@ exports.completeTask = onCall(async (request) => {
       }
 
       if (!dailyProfitSplits || dailyProfitSplits.length !== 5 || splitsBoundary !== dayBoundaryMs) {
-        const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate * 5).toFixed(2));
+        const dailyTotal = Number((currentVipCapital * rates.dailyTaskProfitRate * 5).toFixed(2));
         dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
         splitsBoundary = dayBoundaryMs;
       }
 
       calculatedProfit = Number(dailyProfitSplits[taskCount]) || 0;
       let updatedBalance = Number((currentBalance + calculatedProfit).toFixed(2));
+      let updatedVipCapital = Number((currentVipCapital + calculatedProfit).toFixed(2));
       const updatedTodayEarnings = Number((todayEarnings + calculatedProfit).toFixed(2));
       const updatedTotalEarnings = Number(((userData.totalEarnings || 0) + calculatedProfit).toFixed(2));
       const updatedTaskCount = taskCount + 1;
 
       const previousVipId = Number(userData.lastClaimedVipLevel || 0);
-      const currentTier = getVipTierByBalance(updatedBalance);
+      const currentTier = getVipTierByBalance(updatedVipCapital);
       let upgradeBonusGiven = 0;
       let newClaimedVipId = previousVipId;
 
@@ -2647,6 +2658,7 @@ exports.completeTask = onCall(async (request) => {
           if (capitalDifference > 0) {
             upgradeBonusGiven = Number((capitalDifference * rates.vipUpgradeRate).toFixed(2));
             updatedBalance = Number((updatedBalance + upgradeBonusGiven).toFixed(2));
+            updatedVipCapital = Number((updatedVipCapital + upgradeBonusGiven).toFixed(2));
 
             const bonusRecordRef = userRef.collection("bonuses").doc();
             transaction.set(bonusRecordRef, {
@@ -2675,6 +2687,7 @@ exports.completeTask = onCall(async (request) => {
       transaction.update(userRef, {
         balance: updatedBalance,
         totalBalance: updatedBalance,
+        vipCapital: updatedVipCapital,
         todayEarnings: updatedTodayEarnings,
         totalEarnings: updatedTotalEarnings,
         taskCount: updatedTaskCount,
@@ -2723,9 +2736,10 @@ exports.peekTaskProfit = onCall(async (request) => {
 
       const userData = userDoc.data();
       const currentBalance = Number(userData.balance || 0);
+      const currentVipCapital = (typeof userData.vipCapital === "number") ? userData.vipCapital : currentBalance;
 
-      if (currentBalance < 70) {
-        throw new HttpsError("failed-precondition", "Minimum $70 balance required to perform tasks.");
+      if (currentVipCapital < 70) {
+        throw new HttpsError("failed-precondition", "Minimum $70 working capital required to perform tasks.");
       }
 
       const now = new Date();
@@ -2770,7 +2784,7 @@ exports.peekTaskProfit = onCall(async (request) => {
       }
 
       if (!dailyProfitSplits || dailyProfitSplits.length !== 5 || splitsBoundary !== dayBoundaryMs) {
-        const dailyTotal = Number((currentBalance * rates.dailyTaskProfitRate * 5).toFixed(2));
+        const dailyTotal = Number((currentVipCapital * rates.dailyTaskProfitRate * 5).toFixed(2));
         dailyProfitSplits = generateRandomSplits(dailyTotal, 5);
         splitsBoundary = dayBoundaryMs;
         needsNewUpdate.dailyProfitSplits = dailyProfitSplits;
