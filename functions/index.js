@@ -1590,6 +1590,26 @@ exports.requestWithdrawalOtp = onCall(
       );
     }
 
+    const todayCompletedSnap = await db.collection("withdrawals")
+      .where("userId", "==", userId)
+      .where("status", "==", "completed")
+      .get();
+    const nowMs = Date.now();
+    let todayBoundaryMs = new Date(Date.UTC(new Date(nowMs).getUTCFullYear(), new Date(nowMs).getUTCMonth(), new Date(nowMs).getUTCDate(), 16, 0, 0)).getTime();
+    if (nowMs < todayBoundaryMs) {
+      todayBoundaryMs -= 24 * 60 * 60 * 1000;
+    }
+    const alreadyCompletedToday = todayCompletedSnap.docs.some((d) => {
+      const completedMs = d.data().completedAt && typeof d.data().completedAt.toMillis === "function" ? d.data().completedAt.toMillis() : 0;
+      return completedMs >= todayBoundaryMs;
+    });
+    if (alreadyCompletedToday) {
+      throw new HttpsError(
+        "failed-precondition",
+        "You've already had a withdrawal completed today. Please submit your next request after the daily reset."
+      );
+    }
+
     const targetEmail = userData.email;
     if (!targetEmail) throw new HttpsError("invalid-argument", "No email address is on file for this account.");
 
@@ -1628,6 +1648,26 @@ exports.requestWithdrawal = onCall(async (request) => {
       const pendingSnapshot = await transaction.get(pendingQuery);
       if (!pendingSnapshot.empty) {
         throw new HttpsError("already-exists", "You already have a pending withdrawal request.");
+      }
+
+      const completedTodayQuery = withdrawalsRef
+        .where("userId", "==", userId)
+        .where("status", "==", "completed");
+      const completedTodaySnapshot = await transaction.get(completedTodayQuery);
+      const nowMs2 = Date.now();
+      let todayBoundaryMs2 = new Date(Date.UTC(new Date(nowMs2).getUTCFullYear(), new Date(nowMs2).getUTCMonth(), new Date(nowMs2).getUTCDate(), 16, 0, 0)).getTime();
+      if (nowMs2 < todayBoundaryMs2) {
+        todayBoundaryMs2 -= 24 * 60 * 60 * 1000;
+      }
+      const alreadyCompletedTodayCheck = completedTodaySnapshot.docs.some((d) => {
+        const completedMs = d.data().completedAt && typeof d.data().completedAt.toMillis === "function" ? d.data().completedAt.toMillis() : 0;
+        return completedMs >= todayBoundaryMs2;
+      });
+      if (alreadyCompletedTodayCheck) {
+        throw new HttpsError(
+          "failed-precondition",
+          "You've already had a withdrawal completed today. Please submit your next request after the daily reset."
+        );
       }
 
       const userDoc = await transaction.get(userRef);
