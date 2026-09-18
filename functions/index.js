@@ -2080,10 +2080,17 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     const newBalance = Number((currentBalance + depositAmount).toFixed(2));
 
     const isFirstDeposit = !userData.hasDeposited;
+    const alreadyDisqualified = userData.firstDepositFailed === true;
     let welcomeBonusAmount = 0;
-    if (isFirstDeposit) {
+    let newlyDisqualified = false;
+
+    if (isFirstDeposit && depositAmount < 70) {
+      newlyDisqualified = true;
+    } else if (isFirstDeposit && !alreadyDisqualified) {
       welcomeBonusAmount = Number((depositAmount * rates.welcomeBonusRate).toFixed(2));
     }
+
+    const isDisqualified = alreadyDisqualified || newlyDisqualified;
 
     const finalUserBalance = Number((newBalance + welcomeBonusAmount).toFixed(2));
 
@@ -2117,7 +2124,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     // can ever trigger it again -- there is no per-tier tracking here on
     // purpose, unlike the depositor's own VIP Upgrade Bonus above.
     const wasActiveBefore = isBalanceActive({ balance: currentBalance });
-    const shouldPayReferral = !wasActiveBefore && !!activeTier && userData.referralBonusPaid !== true;
+    const shouldPayReferral = !wasActiveBefore && !!activeTier && userData.referralBonusPaid !== true && !isDisqualified;
     const referralCapitalDifference = shouldPayReferral ? Math.min(depositAmount, activeTier.minCapital) : 0;
 
     let level1Ref = null, level1Doc = null, level1Data = null;
@@ -2146,6 +2153,9 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     };
     if (shouldPayReferral) {
       depositUserUpdate.referralBonusPaid = true;
+    }
+    if (newlyDisqualified) {
+      depositUserUpdate.firstDepositFailed = true;
     }
     transaction.update(userRef, depositUserUpdate);
 
