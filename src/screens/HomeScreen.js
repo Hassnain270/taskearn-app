@@ -409,7 +409,7 @@ export default function HomeScreen({ navigation, route }) {
           <TouchableOpacity onPress={toggleTheme} style={styles.headerIcon}>
             <Feather color={isDarkMode ? "#F59E0B" : "#1E293B"} name={isDarkMode ? "sun" : "moon"} size={22} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('Notices')} style={styles.headerIcon}>
+          <TouchableOpacity onPress={() => navigation.navigate('NotificationsScreen')} style={styles.headerIcon}>
             <Feather color={isDarkMode ? "#E2E8F0" : "#1E293B"} name="bell" size={22} />
           </TouchableOpacity>
         </View>
