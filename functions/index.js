@@ -2199,6 +2199,7 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       vipCapital: finalVipCapitalWithOwnBonus,
       hasDeposited: true,
       lastClaimedVipLevel: newOwnVipId,
+      totalDeposited: admin.firestore.FieldValue.increment(depositAmount),
     };
     if (shouldPayReferral) {
       depositUserUpdate.referralBonusPaid = true;
@@ -3100,81 +3101,182 @@ exports.updateBonusConfig = onCall(async (request) => {
   return { success: true, rates: newRates };
 });
 
-exports.getActivePromotion = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
-  const db = admin.firestore();
-  const snap = await db.collection("config").doc("promotion").get();
-  if (!snap.exists) return { active: false };
-  const data = snap.data();
-  if (data.active !== true) return { active: false };
+// (getActivePromotion / getPromotionConfigForAdmin removed -- replaced by the notifications system)
 
-  const now = Date.now();
-  const start = Number(data.startDate) || 0;
-  const end = Number(data.endDate) || 0;
-  if (now < start || now > end) return { active: false };
+// ============================================================
+// NOTIFICATION SYSTEM
+// A single "notifications" collection holds everything shown on the
+// Home screen's Bell icon: admin broadcasts (app updates, promotions),
+// automatic team-building reminders, and (later) automatic Team
+// Leader/Supervisor/Manager promotions and targets. This is entirely
+// separate from the "Notices" screen (Menu -> Notices), which remains
+// its own thing.
+// ============================================================
 
-  return {
-    active: true,
-    title: data.title || "",
-    message: data.message || "",
-    startDate: start,
-    endDate: end,
-  };
-});
-
-// Lets the admin see whatever promotion is currently configured --
-// active, scheduled, or expired -- so the Bonus Settings screen can be
-// pre-filled instead of always appearing blank. This is what makes it
-// possible for an admin to turn an active promotion off early or edit
-// its dates/text, since without this they can't see what's already set.
-exports.getPromotionConfigForAdmin = onCall(async (request) => {
+// Admin sends a pre-written, editable notification to everyone.
+// type: "app_update" | "promotion" | "custom"
+// For "promotion": promoDetails { startDate, endDate, bonusPercent } is stored too.
+exports.sendAdminNotification = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
   const adminDoc = await db.collection("users").doc(request.auth.uid).get();
   if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
-    throw new HttpsError("permission-denied", "Only administrators may view this.");
-  }
-
-  const snap = await db.collection("config").doc("promotion").get();
-  if (!snap.exists) {
-    return { active: false, title: "", message: "", startDate: 0, endDate: 0 };
-  }
-  const data = snap.data();
-  return {
-    active: data.active === true,
-    title: data.title || "",
-    message: data.message || "",
-    startDate: Number(data.startDate) || 0,
-    endDate: Number(data.endDate) || 0,
-  };
-});
-
-exports.updatePromotionConfig = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
-  const db = admin.firestore();
-  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
-  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
-    throw new HttpsError("permission-denied", "Only administrators may update the promotion.");
+    throw new HttpsError("permission-denied", "Only administrators may send notifications.");
   }
 
   const data = request.data || {};
-  const updates = {
-    active: data.active === true,
-    title: typeof data.title === "string" ? data.title.trim() : "",
-    message: typeof data.message === "string" ? data.message.trim() : "",
-    startDate: Number(data.startDate) || 0,
-    endDate: Number(data.endDate) || 0,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedBy: request.auth.uid,
-  };
+  const type = data.type;
+  const title = (data.title || "").trim();
+  const message = (data.message || "").trim();
 
-  if (updates.active && (!updates.title || !updates.message || !updates.startDate || !updates.endDate)) {
-    throw new HttpsError("invalid-argument", "Title, message, start date, and end date are all required to activate a promotion.");
+  if (!title || !message) {
+    throw new HttpsError("invalid-argument", "Title and message are required.");
+  }
+  if (["app_update", "promotion", "custom"].indexOf(type) === -1) {
+    throw new HttpsError("invalid-argument", "Invalid notification type.");
   }
 
-  await db.collection("config").doc("promotion").set(updates, { merge: true });
+  const notifDoc = {
+    title: title,
+    message: message,
+    type: type,
+    scope: "broadcast",
+    targetUid: null,
+    actionType: type === "app_update" ? "download_apk" : "none",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdBy: request.auth.uid,
+  };
+
+  if (type === "promotion") {
+    notifDoc.promoDetails = {
+      startDate: Number(data.startDate) || 0,
+      endDate: Number(data.endDate) || 0,
+      bonusPercent: Number(data.bonusPercent) || 0,
+    };
+  }
+
+  const ref = await db.collection("notifications").add(notifDoc);
+  return { success: true, id: ref.id };
+});
+
+// Returns broadcast notifications (newest first) plus this user's own
+// personal notifications, and whether each is unread (based on the
+// user's lastNotificationsReadAt timestamp).
+exports.getMyNotifications = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const userId = request.auth.uid;
+
+  const userDoc = await db.collection("users").doc(userId).get();
+  const lastReadMs = (userDoc.exists && userDoc.data().lastNotificationsReadAt && typeof userDoc.data().lastNotificationsReadAt.toMillis === "function")
+    ? userDoc.data().lastNotificationsReadAt.toMillis()
+    : 0;
+
+  const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : 0;
+
+  const broadcastSnap = await db.collection("notifications")
+    .where("scope", "==", "broadcast")
+    .orderBy("createdAt", "desc")
+    .limit(50)
+    .get();
+
+  const personalSnap = await db.collection("notifications")
+    .where("scope", "==", "personal")
+    .where("targetUid", "==", userId)
+    .orderBy("createdAt", "desc")
+    .limit(50)
+    .get();
+
+  const mapDoc = (d) => {
+    const data = d.data();
+    const createdMs = toMillis(data.createdAt);
+    return {
+      id: d.id,
+      title: data.title,
+      message: data.message,
+      type: data.type,
+      actionType: data.actionType || "none",
+      promoDetails: data.promoDetails || null,
+      createdAt: createdMs,
+      unread: createdMs > lastReadMs,
+    };
+  };
+
+  const all = broadcastSnap.docs.map(mapDoc).concat(personalSnap.docs.map(mapDoc));
+  all.sort((a, b) => b.createdAt - a.createdAt);
+
+  return { success: true, notifications: all };
+});
+
+// Marks all of a user's currently-visible notifications as read, by
+// bumping their lastNotificationsReadAt to now.
+exports.markNotificationsRead = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  await db.collection("users").doc(request.auth.uid).update({
+    lastNotificationsReadAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
   return { success: true };
 });
+
+// Internal helper: creates a personal notification for one user.
+// Used by the team-building reminder job below, and later by the Team
+// Leader/Supervisor/Manager promotion system.
+async function createPersonalNotification(db, targetUid, title, message, type) {
+  await db.collection("notifications").add({
+    title: title,
+    message: message,
+    type: type,
+    scope: "personal",
+    targetUid: targetUid,
+    actionType: "none",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+// Runs daily: finds accounts that have withdrawn more than they've
+// deposited and have never referred anyone, and sends them a one-time
+// personal reminder (re-sent at most once every 14 days per user, to
+// avoid spamming) encouraging them to build their team to keep earning
+// smoothly.
+exports.checkAndSendTeamReminders = onSchedule(
+  { schedule: "every 24 hours" },
+  async () => {
+    const db = admin.firestore();
+    const usersSnap = await db.collection("users").get();
+    const REMINDER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
+
+    for (const userDoc of usersSnap.docs) {
+      const uid = userDoc.id;
+      const userData = userDoc.data();
+      if (userData.isAdmin === true) continue;
+
+      const totalDeposited = Number(userData.totalDeposited || 0);
+      const totalWithdraw = Number(userData.totalWithdraw || 0);
+      const hasReferrals = Number(userData.directTeamCount || 0) > 0;
+
+      if (hasReferrals) continue;
+      if (totalWithdraw <= totalDeposited) continue;
+
+      const lastReminderMs = userData.lastTeamReminderSentAt && typeof userData.lastTeamReminderSentAt.toMillis === "function"
+        ? userData.lastTeamReminderSentAt.toMillis()
+        : 0;
+      if (Date.now() - lastReminderMs < REMINDER_COOLDOWN_MS) continue;
+
+      await createPersonalNotification(
+        db,
+        uid,
+        "Keep Your Earnings Growing",
+        "Building your own team unlocks steady referral commissions and helps you keep earning smoothly. Share your referral link today and start growing your network!",
+        "team_reminder"
+      );
+
+      await db.collection("users").doc(uid).update({
+        lastTeamReminderSentAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  }
+);
 
 exports.getMonthlyRewardStatus = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
@@ -3424,18 +3526,24 @@ exports.chatWithSupportAI = onCall(
 
     let activePromotion = null;
     try {
-      const promoSnap = await db.collection("config").doc("promotion").get();
-      if (promoSnap.exists) {
-        const promoData = promoSnap.data();
-        const nowMs = Date.now();
-        const startMs = Number(promoData.startDate) || 0;
-        const endMs = Number(promoData.endDate) || 0;
-        if (promoData.active === true && nowMs >= startMs && nowMs <= endMs) {
+      const promoNotifSnap = await db.collection("notifications")
+        .where("type", "==", "promotion")
+        .orderBy("createdAt", "desc")
+        .limit(5)
+        .get();
+      const nowMs = Date.now();
+      for (const doc of promoNotifSnap.docs) {
+        const promoData = doc.data();
+        const details = promoData.promoDetails || {};
+        const startMs = Number(details.startDate) || 0;
+        const endMs = Number(details.endDate) || 0;
+        if (nowMs >= startMs && nowMs <= endMs) {
           activePromotion = { active: true, title: promoData.title || "", message: promoData.message || "" };
+          break;
         }
       }
     } catch (e) {
-      // No promotion configured or fetch failed -- treat as no active promotion.
+      // No promotion notifications found or fetch failed -- treat as no active promotion.
     }
 
     const systemPrompt = buildSystemPrompt(rates, monthlyReward, activePromotion);
