@@ -113,6 +113,12 @@ export default function AdminPanelScreen({ navigation }) {
       icon: 'bell',
       target: 'AdminSendNotificationScreen',
     },
+    {
+      title: 'Team Ranks',
+      subtitle: 'View Team Leaders, Supervisors, and Managers and their weekly targets',
+      icon: 'award',
+      target: 'AdminTeamRanksScreen',
+    },
   ];
 
   return (
