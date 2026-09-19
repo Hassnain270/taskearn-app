@@ -138,7 +138,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
         setValues(percentValues);
         setOriginalValues(percentValues);
 
-        const wtp = String(data.weeklyTargetPercent ?? 21);
+        const wtp = String(rates.weeklyTargetPercent ?? 21);
         setWeeklyTargetPercent(wtp);
         setOriginalWeeklyTargetPercent(wtp);
 
