@@ -8,7 +8,7 @@ import {
   StatusBar,
   ActivityIndicator
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
@@ -19,6 +19,7 @@ const functionsInstance = getFunctions();
 
 export default function AdminPanelScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
+  const insets = useSafeAreaInsets();
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
   const [accessChecked, setAccessChecked] = useState(false);
@@ -133,7 +134,7 @@ export default function AdminPanelScreen({ navigation }) {
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scrollContainer, { paddingBottom: 20 + insets.bottom }]} showsVerticalScrollIndicator={false}>
 
         {!statsLoading && platformStats && (
           <View style={currentStyles.statsCard}>
