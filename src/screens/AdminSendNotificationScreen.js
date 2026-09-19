@@ -43,7 +43,7 @@ const PRESETS = {
     message: 'A special bonus offer is now live. Check the details below and take advantage before it ends!',
   },
   custom: {
-    label: 'Custom Announcement',
+    label: 'Custom Message',
     icon: 'bullhorn-outline',
     color: '#8B5CF6',
     title: '',
@@ -58,6 +58,12 @@ export default function AdminSendNotificationScreen({ navigation }) {
 
   const [accessChecked, setAccessChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // Where this message is going: the Bell icon's Notifications screen
+  // (timely, personal-feeling, supports push + presets like App
+  // Update/Promotion), or the Menu's Announcements screen (a simple,
+  // durable company-news list with no push and no presets).
+  const [destination, setDestination] = useState('notification');
 
   const [selectedType, setSelectedType] = useState(null);
   const [title, setTitle] = useState('');
@@ -83,6 +89,16 @@ export default function AdminSendNotificationScreen({ navigation }) {
     checkAccess();
   }, []);
 
+  const selectDestination = (dest) => {
+    setDestination(dest);
+    setSelectedType(null);
+    setTitle('');
+    setMessage('');
+    setBonusPercent('');
+    setStartDate('');
+    setEndDate('');
+  };
+
   const selectPreset = (key) => {
     setSelectedType(key);
     setTitle(PRESETS[key].title);
@@ -92,17 +108,22 @@ export default function AdminSendNotificationScreen({ navigation }) {
     setEndDate('');
   };
 
-  const handleSend = () => {
-    if (!selectedType) {
-      showAlert('Select a Type', 'Please choose a notification type first.');
-      return;
-    }
+  const buildPayload = () => {
     if (!title.trim() || !message.trim()) {
       showAlert('Missing Info', 'Title and message are required.');
-      return;
+      return null;
     }
 
-    let payload = {
+    if (destination === 'announcement') {
+      return { title: title.trim(), message: message.trim() };
+    }
+
+    if (!selectedType) {
+      showAlert('Select a Type', 'Please choose a notification type first.');
+      return null;
+    }
+
+    const payload = {
       type: selectedType,
       title: title.trim(),
       message: message.trim(),
@@ -113,18 +134,26 @@ export default function AdminSendNotificationScreen({ navigation }) {
       const endMs = endDate ? new Date(endDate).getTime() : 0;
       if (!startMs || !endMs) {
         showAlert('Missing Dates', 'Please enter both a start date and end date (format: YYYY-MM-DD).');
-        return;
+        return null;
       }
       if (endMs <= startMs) {
         showAlert('Invalid Dates', 'End date must be after the start date.');
-        return;
+        return null;
       }
       payload.startDate = startMs;
       payload.endDate = endMs;
       payload.bonusPercent = Number(bonusPercent) || 0;
     }
 
-    const confirmMessage = 'This will be sent to ALL users immediately. Are you sure?';
+    return payload;
+  };
+
+  const handleSend = () => {
+    const payload = buildPayload();
+    if (!payload) return;
+
+    const destinationLabel = destination === 'announcement' ? "the Announcements screen" : "every user's Notifications";
+    const confirmMessage = 'This will be sent to ' + destinationLabel + ' immediately. Are you sure?';
 
     if (Platform.OS === 'web') {
       if (window.confirm('Confirm Send\n\n' + confirmMessage)) {
@@ -146,9 +175,10 @@ export default function AdminSendNotificationScreen({ navigation }) {
   const performSend = async (payload) => {
     setSending(true);
     try {
-      const sendNotification = httpsCallable(functions, 'sendAdminNotification');
-      await sendNotification(payload);
-      showAlert('Sent', 'Notification has been sent to all users.');
+      const fnName = destination === 'announcement' ? 'sendAnnouncement' : 'sendAdminNotification';
+      const sendFn = httpsCallable(functions, fnName);
+      await sendFn(payload);
+      showAlert('Sent', destination === 'announcement' ? 'Announcement has been posted.' : 'Notification has been sent to all users.');
       setSelectedType(null);
       setTitle('');
       setMessage('');
@@ -156,7 +186,7 @@ export default function AdminSendNotificationScreen({ navigation }) {
       setStartDate('');
       setEndDate('');
     } catch (err) {
-      showAlert('Error', err.message || 'Failed to send notification.');
+      showAlert('Error', err.message || 'Failed to send.');
     } finally {
       setSending(false);
     }
@@ -196,35 +226,56 @@ export default function AdminSendNotificationScreen({ navigation }) {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={[styles.scrollContainer, { paddingBottom: 20 + insets.bottom }]} showsVerticalScrollIndicator={false}>
 
-          <Text style={currentStyles.sectionLabel}>CHOOSE A TYPE</Text>
-          <View style={styles.typeRow}>
-            {Object.keys(PRESETS).map((key) => {
-              const preset = PRESETS[key];
-              const active = selectedType === key;
-              return (
-                <TouchableOpacity
-                  key={key}
-                  style={[
-                    currentStyles.typeCard,
-                    active && { borderColor: preset.color, borderWidth: 2 }
-                  ]}
-                  onPress={() => selectPreset(key)}
-                >
-                  <MaterialCommunityIcons name={preset.icon} size={22} color={preset.color} />
-                  <Text style={currentStyles.typeLabel}>{preset.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
+          <Text style={currentStyles.sectionLabel}>WHERE SHOULD THIS GO?</Text>
+          <View style={styles.destRow}>
+            <TouchableOpacity
+              style={[currentStyles.destCard, destination === 'notification' && { borderColor: '#3B82F6', borderWidth: 2 }]}
+              onPress={() => selectDestination('notification')}
+            >
+              <Feather name="bell" size={20} color="#3B82F6" />
+              <Text style={currentStyles.destLabel}>Notification</Text>
+              <Text style={styles.destSubtext}>Bell icon, pushes to devices</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[currentStyles.destCard, destination === 'announcement' && { borderColor: '#EF4444', borderWidth: 2 }]}
+              onPress={() => selectDestination('announcement')}
+            >
+              <MaterialCommunityIcons name="bullhorn-outline" size={20} color="#EF4444" />
+              <Text style={currentStyles.destLabel}>Announcement</Text>
+              <Text style={styles.destSubtext}>Menu screen, no push</Text>
+            </TouchableOpacity>
           </View>
 
-          {selectedType && (
+          {destination === 'notification' && (
+            <>
+              <Text style={currentStyles.sectionLabel}>CHOOSE A TYPE</Text>
+              <View style={styles.typeRow}>
+                {Object.keys(PRESETS).map((key) => {
+                  const preset = PRESETS[key];
+                  const active = selectedType === key;
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[currentStyles.typeCard, active && { borderColor: preset.color, borderWidth: 2 }]}
+                      onPress={() => selectPreset(key)}
+                    >
+                      <MaterialCommunityIcons name={preset.icon} size={22} color={preset.color} />
+                      <Text style={currentStyles.typeLabel}>{preset.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          {(destination === 'announcement' || selectedType) && (
             <>
               <Text style={currentStyles.sectionLabel}>TITLE</Text>
               <TextInput
                 style={currentStyles.input}
                 value={title}
                 onChangeText={setTitle}
-                placeholder="Notification title"
+                placeholder="Title"
                 placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
               />
 
@@ -233,12 +284,12 @@ export default function AdminSendNotificationScreen({ navigation }) {
                 style={[currentStyles.input, { height: 100, textAlignVertical: 'top' }]}
                 value={message}
                 onChangeText={setMessage}
-                placeholder="Notification message"
+                placeholder="Message"
                 placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
                 multiline
               />
 
-              {selectedType === 'promotion' && (
+              {destination === 'notification' && selectedType === 'promotion' && (
                 <>
                   <Text style={currentStyles.sectionLabel}>BONUS PERCENTAGE (OPTIONAL)</Text>
                   <TextInput
@@ -271,7 +322,9 @@ export default function AdminSendNotificationScreen({ navigation }) {
               )}
 
               <TouchableOpacity style={styles.sendBtn} onPress={handleSend} disabled={sending}>
-                {sending ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.sendBtnText}>Send to All Users</Text>}
+                {sending ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.sendBtnText}>
+                  {destination === 'announcement' ? 'Post Announcement' : 'Send to All Users'}
+                </Text>}
               </TouchableOpacity>
             </>
           )}
@@ -288,6 +341,8 @@ const lightStyles = StyleSheet.create({
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#1E293B' },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 8, marginTop: 16 },
+  destCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#F1F5F9', gap: 4 },
+  destLabel: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
   typeCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#F1F5F9', gap: 6 },
   typeLabel: { fontSize: 10, fontWeight: '700', color: '#1E293B', textAlign: 'center' },
   input: { backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, color: '#1E293B', fontSize: 13 }
@@ -299,6 +354,8 @@ const darkStyles = StyleSheet.create({
   backButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#161B22', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#21262D' },
   headerTitle: { fontSize: 15, fontWeight: 'bold', color: '#FFFFFF' },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5, marginBottom: 8, marginTop: 16 },
+  destCard: { flex: 1, backgroundColor: '#161B22', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#21262D', gap: 4 },
+  destLabel: { fontSize: 12, fontWeight: '700', color: '#FFFFFF' },
   typeCard: { flex: 1, backgroundColor: '#161B22', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#21262D', gap: 6 },
   typeLabel: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', textAlign: 'center' },
   input: { backgroundColor: '#0D1117', borderRadius: 10, borderWidth: 1, borderColor: '#21262D', padding: 12, color: '#FFFFFF', fontSize: 13 }
@@ -306,6 +363,8 @@ const darkStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   scrollContainer: { padding: 16 },
+  destRow: { flexDirection: 'row', gap: 10 },
+  destSubtext: { fontSize: 9, fontWeight: '500', color: '#94A3B8', textAlign: 'center', marginTop: 2 },
   typeRow: { flexDirection: 'row', gap: 10 },
   sendBtn: { backgroundColor: '#3B82F6', height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 24 },
   sendBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
