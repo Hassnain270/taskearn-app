@@ -648,10 +648,14 @@ exports.calculateTeamStats = onCall(async (request) => {
 
     const boundaries = getPktResetBoundaries();
     const dayResetUtcMs = boundaries.dayResetUtcMs;
+    const weekResetUtcMs = boundaries.weekResetUtcMs;
     const monthResetUtcMs = boundaries.monthResetUtcMs;
     const monthLabel = boundaries.monthLabel;
 
     let globalTodayCount = 0;
+    let globalWeekCount = 0;
+    let globalWeekActiveCount = 0;
+    let globalWeekInactiveCount = 0;
     let globalMonthCount = 0;
     let globalActiveCount = 0;
     let globalInactiveCount = 0;
@@ -665,6 +669,10 @@ exports.calculateTeamStats = onCall(async (request) => {
         if (cTime >= dayResetUtcMs) globalTodayCount++;
         if (cTime >= monthResetUtcMs) globalMonthCount++;
         if (isBalanceActive(c)) globalActiveCount++; else globalInactiveCount++;
+        if (cTime >= weekResetUtcMs) {
+          globalWeekCount++;
+          if (isBalanceActive(c)) globalWeekActiveCount++; else globalWeekInactiveCount++;
+        }
 
         const childCode = c.referralCode || c.referral || c.id.substring(0, 6).toUpperCase();
         count += calculateSubTree(childCode);
@@ -681,6 +689,10 @@ exports.calculateTeamStats = onCall(async (request) => {
       if (dTime >= dayResetUtcMs) globalTodayCount++;
       if (dTime >= monthResetUtcMs) globalMonthCount++;
       if (isBalanceActive(d)) globalActiveCount++; else globalInactiveCount++;
+      if (dTime >= weekResetUtcMs) {
+        globalWeekCount++;
+        if (isBalanceActive(d)) globalWeekActiveCount++; else globalWeekInactiveCount++;
+      }
 
       const childCode = d.referralCode || d.referral || d.id.substring(0, 6).toUpperCase();
       const subTreeCount = calculateSubTree(childCode);
@@ -701,6 +713,9 @@ exports.calculateTeamStats = onCall(async (request) => {
       totalActiveTeamMembers: globalActiveCount,
       totalInactiveTeamMembers: globalInactiveCount,
       todayJoinings: globalTodayCount,
+      weeklyJoinings: globalWeekCount,
+      weeklyActiveJoinings: globalWeekActiveCount,
+      weeklyInactiveJoinings: globalWeekInactiveCount,
       monthlyJoinings: globalMonthCount,
       monthLabel: monthLabel,
       directMembersData: processedDirects,
