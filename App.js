@@ -41,6 +41,7 @@ import AdminAllDepositsScreen from './src/screens/AdminAllDepositsScreen';
 import AdminAllWithdrawalsScreen from './src/screens/AdminAllWithdrawalsScreen';
 import AdminTopRecruitersScreen from './src/screens/AdminTopRecruitersScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
+import AdminSendNotificationScreen from './src/screens/AdminSendNotificationScreen';
 
 // Ensures a notification banner/sound appears even while the app is open
 // in the foreground (Expo's default is to suppress this unless a handler
@@ -271,6 +272,7 @@ export default function App() {
               <Stack.Screen name="AdminAllWithdrawalsScreen" component={AdminAllWithdrawalsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="AdminTopRecruitersScreen" component={AdminTopRecruitersScreen} options={{ headerShown: false }} />
               <Stack.Screen name="NotificationsScreen" component={NotificationsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="AdminSendNotificationScreen" component={AdminSendNotificationScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
           </NavigationContainer>
         </ThemeProvider>

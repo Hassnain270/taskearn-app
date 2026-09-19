@@ -107,6 +107,12 @@ export default function AdminPanelScreen({ navigation }) {
       icon: 'users',
       target: 'AdminUserManagementScreen',
     },
+    {
+      title: 'Send Notification',
+      subtitle: 'Broadcast an app update, promotion, or custom announcement',
+      icon: 'bell',
+      target: 'AdminSendNotificationScreen',
+    },
   ];
 
   return (
