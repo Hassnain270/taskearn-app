@@ -33,6 +33,9 @@ export default function TeamScreen({ navigation, route }) {
   const [totalInactiveTeamMembers, setTotalInactiveTeamMembers] = useState(0);
   const [todayJoinings, setTodayJoinings] = useState(0);
   const [monthlyJoinings, setMonthlyJoinings] = useState(0);
+  const [weeklyJoinings, setWeeklyJoinings] = useState(0);
+  const [weeklyActiveJoinings, setWeeklyActiveJoinings] = useState(0);
+  const [weeklyInactiveJoinings, setWeeklyInactiveJoinings] = useState(0);
   const [monthLabel, setMonthLabel] = useState("");
 
   // Which of the two direct-member tabs is currently shown. Defaults to
@@ -52,13 +55,16 @@ export default function TeamScreen({ navigation, route }) {
         const result = await calculateStats();
 
         if (result.data) {
-          const { totalTeamSize, totalActiveTeamMembers, totalInactiveTeamMembers, todayJoinings, monthlyJoinings, monthLabel, directMembersData, referralCode, balance, username } = result.data;
+          const { totalTeamSize, totalActiveTeamMembers, totalInactiveTeamMembers, todayJoinings, weeklyJoinings, weeklyActiveJoinings, weeklyInactiveJoinings, monthlyJoinings, monthLabel, directMembersData, referralCode, balance, username } = result.data;
 
           setTotalTeamSize(totalTeamSize || 0);
           setTotalActiveTeamMembers(totalActiveTeamMembers || 0);
           setTotalInactiveTeamMembers(totalInactiveTeamMembers || 0);
           setTodayJoinings(todayJoinings || 0);
           setMonthlyJoinings(monthlyJoinings || 0);
+          setWeeklyJoinings(weeklyJoinings || 0);
+          setWeeklyActiveJoinings(weeklyActiveJoinings || 0);
+          setWeeklyInactiveJoinings(weeklyInactiveJoinings || 0);
           if (monthLabel) setMonthLabel(monthLabel);
           setDirectMembersData(directMembersData || []);
           if (referralCode) setReferralCode(referralCode);
@@ -177,10 +183,9 @@ export default function TeamScreen({ navigation, route }) {
             <View style={[styles.iconIndicator, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
               <Feather name="calendar" size={16} color="#3B82F6" />
             </View>
-            <Text style={styles.growthLabel}>
-              This Month{monthLabel ? ` (${monthLabel})` : ''}
-            </Text>
-            <Text style={[styles.growthValue, { color: '#3B82F6' }]}>+{monthlyJoinings}</Text>
+            <Text style={styles.growthLabel}>This Week</Text>
+            <Text style={[styles.growthValue, { color: '#3B82F6' }]}>+{weeklyJoinings}</Text>
+            <Text style={styles.weeklyBreakdownText}>({weeklyActiveJoinings} Active, {weeklyInactiveJoinings} Inactive)</Text>
           </View>
         </View>
 
@@ -339,6 +344,7 @@ const styles = StyleSheet.create({
   iconIndicator: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   growthLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '600' },
   growthValue: { fontSize: 18, fontWeight: 'bold', marginTop: 4 },
+  weeklyBreakdownText: { fontSize: 9, fontWeight: '600', color: '#94A3B8', marginTop: 2 },
   promoHeaderRow: { flexDirection: 'row', alignItems: 'center' },
   inviteButton: { backgroundColor: '#2563EB', height: 42, borderRadius: 10, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
   inviteButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: 'bold' },
