@@ -3419,6 +3419,141 @@ function checkRankQualification(directMembers, allUsersByReferralCode, rankKey) 
   return qualifyingSubCount >= req.subCount;
 }
 
+// ============================================================
+// WEEKLY TARGET SYSTEM -- runs every Monday at 9 PM Pakistan time
+// (16:00 UTC), matching the app's day-cycle boundary. For every
+// ranked user (team_leader/supervisor/manager): evaluates last
+// week's performance (if a target was already running), pays the
+// reward, then issues a new target for the week just starting, all
+// in a single combined notification.
+// ============================================================
+function countActiveTeamSize(userId, allUsers, usersByUid) {
+  const directMembers = allUsers.filter((u) => u.referredByUid === userId);
+  let count = 0;
+  const visit = (members) => {
+    members.forEach((m) => {
+      if (isBalanceActive(m)) count++;
+      const children = allUsers.filter((u) => u.referredByUid === m.id);
+      if (children.length > 0) visit(children);
+    });
+  };
+  visit(directMembers);
+  return count;
+}
+
+function countActiveJoiningsSince(userId, allUsers, sinceMs, untilMs) {
+  const directMembers = allUsers.filter((u) => u.referredByUid === userId);
+  let count = 0;
+  const visit = (members) => {
+    members.forEach((m) => {
+      const joinMs = getMemberTimestamp(m.createdAt);
+      if (isBalanceActive(m) && joinMs >= sinceMs && joinMs < untilMs) count++;
+      const children = allUsers.filter((u) => u.referredByUid === m.id);
+      if (children.length > 0) visit(children);
+    });
+  };
+  visit(directMembers);
+  return count;
+}
+
+exports.processWeeklyTeamTargets = onSchedule(
+  { schedule: "every monday 21:00", timeZone: "Asia/Karachi" },
+  async () => {
+    const db = admin.firestore();
+    const rates = await getBonusRates(db);
+    const targetPercent = typeof rates.weeklyTargetPercent === "number" ? rates.weeklyTargetPercent : 21;
+
+    const usersSnap = await db.collection("users").get();
+    const allUsers = usersSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    const usersByUid = {};
+    allUsers.forEach((u) => { usersByUid[u.id] = u; });
+
+    const nowMs = Date.now();
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+
+    for (const user of allUsers) {
+      const rank = user.teamRank || "none";
+      if (rank === "none") continue;
+
+      const rankLabel = rank === "manager" ? "Team Manager" : rank === "supervisor" ? "Team Supervisor" : "Team Leader";
+      const rewardRate = RANK_REQUIREMENTS[rank].rewardPerJoining;
+
+      let resultMessage = "";
+
+      const hadPreviousTarget = typeof user.weeklyTargetStartMs === "number" && typeof user.weeklyTargetCount === "number";
+      if (hadPreviousTarget) {
+        const prevStart = user.weeklyTargetStartMs;
+        const prevEnd = prevStart + weekMs;
+        const prevTeamSize = user.weeklyTargetTeamSize || 0;
+        const prevTargetCount = user.weeklyTargetCount || 0;
+        const actualJoinings = countActiveJoiningsSince(user.id, allUsers, prevStart, prevEnd);
+        const achievedPercent = prevTargetCount > 0 ? (actualJoinings / prevTargetCount) * 100 : 100;
+
+        let rewardMultiplier = 0;
+        if (achievedPercent >= 100) rewardMultiplier = 1;
+        else if (achievedPercent >= 50) rewardMultiplier = 0.5;
+
+        const rewardEarned = Number((actualJoinings * rewardRate * rewardMultiplier).toFixed(2));
+
+        if (rewardEarned > 0) {
+          const userRef = db.collection("users").doc(user.id);
+          await userRef.update({
+            balance: admin.firestore.FieldValue.increment(rewardEarned),
+            totalBalance: admin.firestore.FieldValue.increment(rewardEarned),
+          });
+          const txRef = db.collection("transactions").doc();
+          await txRef.set({
+            transactionId: txRef.id,
+            userId: user.id,
+            type: "WEEKLY_TEAM_REWARD",
+            amount: rewardEarned,
+            status: "approved",
+            title: rankLabel + " Weekly Reward (" + Math.round(achievedPercent) + "% of target)",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        await db.collection("weeklyTargetHistory").add({
+          userId: user.id,
+          rank: rank,
+          weekStartMs: prevStart,
+          teamSize: prevTeamSize,
+          targetCount: prevTargetCount,
+          actualJoinings: actualJoinings,
+          achievedPercent: Number(achievedPercent.toFixed(1)),
+          rewardEarned: rewardEarned,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        if (rewardEarned > 0) {
+          resultMessage = "Last week: your team had " + prevTeamSize + " active members, your target was " + prevTargetCount + " new active joinings, and you achieved " + actualJoinings + " (" + Math.round(achievedPercent) + "%). You've earned $" + rewardEarned.toFixed(2) + "!\n\n";
+        } else {
+          resultMessage = "Last week: your team had " + prevTeamSize + " active members, your target was " + prevTargetCount + " new active joinings, and you achieved " + actualJoinings + " (" + Math.round(achievedPercent) + "%). No reward this time -- keep building your team!\n\n";
+        }
+      }
+
+      const currentTeamSize = countActiveTeamSize(user.id, allUsers, usersByUid);
+      const newTargetCount = Math.max(1, Math.ceil(currentTeamSize * targetPercent / 100));
+
+      await db.collection("users").doc(user.id).update({
+        weeklyTargetStartMs: nowMs,
+        weeklyTargetTeamSize: currentTeamSize,
+        weeklyTargetCount: newTargetCount,
+      });
+
+      const targetMessage = "This week's target: your active team is currently " + currentTeamSize + " members. Bring in " + newTargetCount + " new active joinings (" + targetPercent + "% of your team) by Sunday 9 PM to earn your full " + rankLabel + " reward.";
+
+      await createPersonalNotification(
+        db,
+        user.id,
+        "Your Weekly Team Target",
+        resultMessage + targetMessage,
+        "weekly_target"
+      );
+    }
+  }
+);
+
 exports.checkAndPromoteTeamRanks = onSchedule(
   { schedule: "every 24 hours" },
   async () => {
