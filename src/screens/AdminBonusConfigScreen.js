@@ -101,7 +101,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
   const [originalValues, setOriginalValues] = useState({});
   const [lastUpdatedInfo, setLastUpdatedInfo] = useState(null);
 
-  const [promoStartDate, setPromoStartDate] = useState('');
+
   const [promoEndDate, setPromoEndDate] = useState('');
   const [savingPromo, setSavingPromo] = useState(false);
 
@@ -142,15 +142,6 @@ export default function AdminBonusConfigScreen({ navigation }) {
         setWeeklyTargetPercent(wtp);
         setOriginalWeeklyTargetPercent(wtp);
 
-        const getPromoConfig = httpsCallable(functions, 'getPromotionConfigForAdmin');
-        const promoRes = await getPromoConfig();
-        if (promoRes.data) {
-          setPromoActive(promoRes.data.active === true);
-          setPromoTitle(promoRes.data.title || '');
-          setPromoMessage(promoRes.data.message || '');
-          setPromoStartDate(formatDateForInput(promoRes.data.startDate));
-          setPromoEndDate(formatDateForInput(promoRes.data.endDate));
-        }
       } catch (err) {
         showAlert('Error', err.message || 'Failed to load current bonus rates.');
       } finally {
@@ -237,42 +228,6 @@ export default function AdminBonusConfigScreen({ navigation }) {
     }
   };
 
-  const handleSavePromotion = async () => {
-    if (promoActive) {
-      if (!promoTitle.trim() || !promoMessage.trim()) {
-        showAlert('Missing Info', 'Title and message are required to activate a promotion.');
-        return;
-      }
-      const startMs = new Date(promoStartDate).getTime();
-      const endMs = new Date(promoEndDate).getTime();
-      if (isNaN(startMs) || isNaN(endMs)) {
-        showAlert('Invalid Date', 'Use format YYYY-MM-DD for both start and end date.');
-        return;
-      }
-      if (endMs <= startMs) {
-        showAlert('Invalid Date', 'End date must be after the start date.');
-        return;
-      }
-    }
-
-    setSavingPromo(true);
-    try {
-      const updatePromotion = httpsCallable(functions, 'updatePromotionConfig');
-      await updatePromotion({
-        active: promoActive,
-        title: promoTitle.trim(),
-        message: promoMessage.trim(),
-        startDate: promoStartDate ? new Date(promoStartDate).getTime() : 0,
-        endDate: promoEndDate ? new Date(promoEndDate).getTime() : 0,
-      });
-      showAlert('Saved', promoActive ? 'Promotion is now live -- users will see it the next time they open the app.' : 'Promotion turned off.');
-    } catch (err) {
-      showAlert('Error', err.message || 'Failed to save the promotion.');
-    } finally {
-      setSavingPromo(false);
-    }
-  };
-
   if (accessChecked && !isAdmin) {
     return (
       <SafeAreaView edges={['top']} style={currentStyles.container}>
@@ -350,85 +305,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
 
             
 
-            <View style={currentStyles.infoBox}>
-              <View style={styles.infoHeaderRow}>
-                <MaterialCommunityIcons name="bullhorn-outline" size={18} color="#8B5CF6" />
-                <Text style={currentStyles.infoTitle}>Home Screen Promotion</Text>
-              </View>
-              <Text style={currentStyles.infoDescription}>
-                When active, this shows as a popup to every user the next time they open the app. Turn off when the offer ends.
-              </Text>
-            </View>
-
-            <View style={[currentStyles.fieldCard, styles.promoToggleRow]}>
-              <Text style={currentStyles.fieldLabel}>Promotion Active</Text>
-              <Switch value={promoActive} onValueChange={setPromoActive} trackColor={{ true: '#3B82F6' }} />
-            </View>
-
-            <View style={currentStyles.fieldCard}>
-              <Text style={currentStyles.fieldLabel}>Title</Text>
-              <View style={currentStyles.inputRow}>
-                <TextInput
-                  style={currentStyles.percentInput}
-                  value={promoTitle}
-                  onChangeText={setPromoTitle}
-                  placeholder="e.g. Referral Bonus Boost"
-                  placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                />
-              </View>
-            </View>
-
-            <View style={currentStyles.fieldCard}>
-              <Text style={currentStyles.fieldLabel}>Message</Text>
-              <View style={[currentStyles.inputRow, { height: 90, alignItems: 'flex-start', paddingVertical: 10 }]}>
-                <TextInput
-                  style={[currentStyles.percentInput, { textAlignVertical: 'top' }]}
-                  value={promoMessage}
-                  onChangeText={setPromoMessage}
-                  placeholder="e.g. Direct referral bonus is now 15% until Sep 10!"
-                  placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                  multiline
-                />
-              </View>
-            </View>
-
-            <View style={currentStyles.fieldCard}>
-              <Text style={currentStyles.fieldLabel}>Start Date (YYYY-MM-DD)</Text>
-              <View style={currentStyles.inputRow}>
-                <TextInput
-                  style={currentStyles.percentInput}
-                  value={promoStartDate}
-                  onChangeText={setPromoStartDate}
-                  placeholder="2026-09-05"
-                  placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                />
-              </View>
-            </View>
-
-            <View style={currentStyles.fieldCard}>
-              <Text style={currentStyles.fieldLabel}>End Date (YYYY-MM-DD)</Text>
-              <View style={currentStyles.inputRow}>
-                <TextInput
-                  style={currentStyles.percentInput}
-                  value={promoEndDate}
-                  onChangeText={setPromoEndDate}
-                  placeholder="2026-09-12"
-                  placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                />
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.saveButton, { marginBottom: 20 }]}
-              onPress={handleSavePromotion}
-              disabled={savingPromo}
-            >
-              {savingPromo ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.saveButtonText}>Save Promotion</Text>
-              )}
-            </TouchableOpacity>
+            
 
             <View style={currentStyles.infoBox}>
               <View style={styles.infoHeaderRow}>
