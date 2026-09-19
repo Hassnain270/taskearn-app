@@ -1255,6 +1255,86 @@ exports.adminGetTopRecruiters = onCall(async (request) => {
   return { success: true, leaderboard: leaderboard, periodLabel: periodLabel };
 });
 
+// Lists all users at a given rank (team_leader/supervisor/manager)
+// with their current week's target and progress-so-far, for the
+// admin dashboard's rank tabs.
+exports.adminGetTeamRankUsers = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const rank = (request.data && request.data.rank) || "team_leader";
+  if (["team_leader", "supervisor", "manager"].indexOf(rank) === -1) {
+    throw new HttpsError("invalid-argument", "Invalid rank.");
+  }
+
+  const usersSnap = await db.collection("users").where("teamRank", "==", rank).get();
+  const allUsersSnap = await db.collection("users").get();
+  const allUsers = allUsersSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+
+  const results = usersSnap.docs.map((d) => {
+    const u = d.data();
+    const targetCount = u.weeklyTargetCount || 0;
+    const startMs = u.weeklyTargetStartMs || null;
+    let currentProgress = 0;
+    if (startMs) {
+      currentProgress = countActiveJoiningsSince(d.id, allUsers, startMs, startMs + weekMs);
+    }
+    const percent = targetCount > 0 ? Math.round((currentProgress / targetCount) * 100) : 0;
+    return {
+      uid: d.id,
+      username: u.username || d.id,
+      teamSize: u.weeklyTargetTeamSize || 0,
+      targetCount: targetCount,
+      currentProgress: currentProgress,
+      percent: percent,
+      weekStartMs: startMs,
+    };
+  });
+
+  results.sort((a, b) => b.percent - a.percent);
+
+  return { success: true, users: results };
+});
+
+// Full weekly history for one user (all past weeks, most recent first).
+exports.adminGetWeeklyTargetHistory = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const targetUid = request.data && request.data.uid;
+  if (!targetUid) throw new HttpsError("invalid-argument", "A user UID is required.");
+
+  const snap = await db.collection("weeklyTargetHistory")
+    .where("userId", "==", targetUid)
+    .orderBy("weekStartMs", "desc")
+    .limit(20)
+    .get();
+
+  const history = snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      weekStartMs: data.weekStartMs,
+      teamSize: data.teamSize,
+      targetCount: data.targetCount,
+      actualJoinings: data.actualJoinings,
+      achievedPercent: data.achievedPercent,
+      rewardEarned: data.rewardEarned,
+    };
+  });
+
+  return { success: true, history: history };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
