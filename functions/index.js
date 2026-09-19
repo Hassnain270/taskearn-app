@@ -59,15 +59,13 @@ function buildVipLevelsText(dailyTaskProfitRate) {
   return "VIP LEVELS (based on account capital balance in USDT):\n" + lines.join("\n");
 }
 
-function buildSystemPrompt(rates, monthlyReward, activePromotion) {
+function buildSystemPrompt(rates, activePromotion) {
   const welcomePct = formatPercent(rates.welcomeBonusRate);
   const directPct = formatPercent(rates.directReferralRate);
   const indirectPct = formatPercent(rates.indirectReferralRate);
   const vipUpgradePct = formatPercent(rates.vipUpgradeRate);
   const vipLevelsText = buildVipLevelsText(rates.dailyTaskProfitRate);
-  const monthlyRewardText = (monthlyReward && monthlyReward.active)
-    ? ("TaskEarn also runs a Monthly Reward program. Once a user has at least " + monthlyReward.directReferralThreshold + " ACTIVE direct referrals (each with an account balance of $70 or more), a Claim Monthly Reward button becomes enabled on their Team screen. Tapping it submits a claim for review by TaskEarn's headquarters team; once approved, $" + monthlyReward.rewardAmount.toFixed(2) + " USDT is credited to their balance. This threshold and reward amount can change over time at TaskEarn's discretion.")
-    : "TaskEarn also has a Monthly Reward program, but it is temporarily paused right now and not accepting new claims. Let the user know it exists but is currently on hold.";
+  const monthlyRewardText = "TaskEarn does not have a monthly reward program. Instead, it runs a Weekly Team Target system for users ranked Team Leader, Supervisor, or Manager. A user is automatically promoted to Team Leader once they have 12 active direct referrals AND at least 5 of those direct referrals have each brought in 2 of their own active referrals. Supervisor requires 25 active direct referrals with at least 10 of them having 3 of their own active referrals each. Manager requires 50 active direct referrals with at least 25 of them having 5 of their own active referrals each. Ranks are earned automatically (never manually requested) and are never lost once achieved. Every Monday, each ranked user receives a new weekly target: a percentage (currently " + formatPercent(rates.weeklyTargetPercent / 100) + ") of their current active team size, representing how many new active team members they need by the following Monday. Reward per active joining across their WHOLE team (direct and indirect) is $1 for Team Leader, $2 for Supervisor, and $3 for Manager. If they hit 100% or more of the target, they get the full reward; 50-99% gets half the reward; below 50% gets no reward that week, but a new target is issued regardless. Rewards and target results are delivered automatically via a personal notification (the Bell icon) every Monday.";
   const promotionText = (activePromotion && activePromotion.active)
     ? ("There is a limited-time promotion currently running: \"" + activePromotion.title + "\" -- " + activePromotion.message + " This offer is active now. If a user asks about current offers, deals, or promotions, tell them about this one using these exact details.")
     : "There is no limited-time promotion currently running. If a user asks about current offers or deals, let them know there isn't a special promotion active right now, but to keep an eye on the app's popups and announcements for future ones.";
@@ -224,23 +222,6 @@ async function getBonusRates(db) {
     console.error("Error reading bonus config, using defaults:", e);
   }
   return DEFAULT_BONUS_RATES;
-}
-
-async function getMonthlyRewardConfigInternal(db) {
-  try {
-    const snap = await db.collection("config").doc("monthlyReward").get();
-    if (snap.exists) {
-      const data = snap.data();
-      return {
-        directReferralThreshold: typeof data.directReferralThreshold === "number" ? data.directReferralThreshold : DEFAULT_MONTHLY_REWARD_CONFIG.directReferralThreshold,
-        rewardAmount: typeof data.rewardAmount === "number" ? data.rewardAmount : DEFAULT_MONTHLY_REWARD_CONFIG.rewardAmount,
-        active: typeof data.active === "boolean" ? data.active : DEFAULT_MONTHLY_REWARD_CONFIG.active,
-      };
-    }
-  } catch (e) {
-    console.error("Error reading monthly reward config, using defaults:", e);
-  }
-  return DEFAULT_MONTHLY_REWARD_CONFIG;
 }
 
 function calculateVipLockedCapital(balance) {
@@ -3722,7 +3703,6 @@ exports.chatWithSupportAI = onCall(
 
     const db = admin.firestore();
     const rates = await getBonusRates(db);
-    const monthlyReward = await getMonthlyRewardConfigInternal(db);
 
     let activePromotion = null;
     try {
@@ -3746,7 +3726,7 @@ exports.chatWithSupportAI = onCall(
       // No promotion notifications found or fetch failed -- treat as no active promotion.
     }
 
-    const systemPrompt = buildSystemPrompt(rates, monthlyReward, activePromotion);
+    const systemPrompt = buildSystemPrompt(rates, activePromotion);
 
     const groq = new Groq({ apiKey: apiKey });
 
