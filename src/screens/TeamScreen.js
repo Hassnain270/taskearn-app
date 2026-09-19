@@ -43,13 +43,7 @@ export default function TeamScreen({ navigation, route }) {
   // has configured in Bonus Settings (threshold, reward amount). Never
   // hard-coded here: if the admin changes the requirement, this screen
   // reflects it the next time it loads, automatically.
-  const [rewardThreshold, setRewardThreshold] = useState(15);
-  const [rewardAmount, setRewardAmount] = useState(0);
-  const [activeDirectCount, setActiveDirectCount] = useState(0);
-  const [rewardEligible, setRewardEligible] = useState(false);
-  const [hasPendingClaim, setHasPendingClaim] = useState(false);
-  const [claimingReward, setClaimingReward] = useState(false);
-  const [rewardSystemActive, setRewardSystemActive] = useState(true);
+
 
   useEffect(() => {
     const fetchTeamStats = async () => {
@@ -81,45 +75,11 @@ export default function TeamScreen({ navigation, route }) {
     fetchTeamStats();
   }, []);
 
-  useEffect(() => {
-    const fetchRewardStatus = async () => {
-      try {
-        const getStatus = httpsCallable(functions, 'getMonthlyRewardStatus');
-        const res = await getStatus();
-        if (res.data) {
-          setRewardThreshold(res.data.threshold || 15);
-          setRewardAmount(res.data.rewardAmount || 0);
-          setActiveDirectCount(res.data.activeDirectCount || 0);
-          setRewardEligible(res.data.eligible === true);
-          setHasPendingClaim(res.data.hasPendingClaim === true);
-          setRewardSystemActive(res.data.systemActive !== false);
-        }
-      } catch (error) {
-        console.error("Reward status error:", error);
-      }
-    };
-    fetchRewardStatus();
-  }, []);
-
   const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
       window.alert(title + "\n\n" + message);
     } else {
       Alert.alert(title, message);
-    }
-  };
-
-  const handleClaimReward = async () => {
-    setClaimingReward(true);
-    try {
-      const claimReward = httpsCallable(functions, 'claimMonthlyReward');
-      const res = await claimReward();
-      showAlert("Request Submitted", (res.data && res.data.message) || "Your reward claim has been submitted for review.");
-      setHasPendingClaim(true);
-    } catch (error) {
-      showAlert("Error", error.message || "Failed to submit your reward claim.");
-    } finally {
-      setClaimingReward(false);
     }
   };
 
@@ -238,35 +198,6 @@ export default function TeamScreen({ navigation, route }) {
           >
             <FontAwesome5 name="user-plus" size={14} color="#FFFFFF" style={{ marginRight: 8 }} />
             <Text style={styles.inviteButtonText}>Invite Friends</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={currentStyles.rewardCard}>
-          <View style={styles.rewardHeaderRow}>
-            <MaterialCommunityIcons name="cash-multiple" size={18} color="#EAB308" />
-            <Text style={currentStyles.rewardTitle}>Monthly Reward</Text>
-          </View>
-          <Text style={styles.rewardProgressText}>
-            Active Direct Referrals: {activeDirectCount} / {rewardThreshold}
-          </Text>
-          {rewardAmount > 0 && (
-            <Text style={styles.rewardAmountText}>{'Reward: $' + rewardAmount.toFixed(2) + ' USDT'}</Text>
-          )}
-          <TouchableOpacity
-            style={[
-              styles.claimRewardBtn,
-              (!rewardSystemActive || !rewardEligible || hasPendingClaim) && styles.claimRewardBtnDisabled
-            ]}
-            onPress={handleClaimReward}
-            disabled={!rewardSystemActive || !rewardEligible || hasPendingClaim || claimingReward}
-          >
-            {claimingReward ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <Text style={styles.claimRewardBtnText}>
-                {!rewardSystemActive ? "Monthly Rewards Currently Paused" : (hasPendingClaim ? "Request Pending Review" : (rewardEligible ? "Claim Monthly Reward" : "Requirements Not Met Yet"))}
-              </Text>
-            )}
           </TouchableOpacity>
         </View>
 

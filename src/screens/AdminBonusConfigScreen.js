@@ -101,17 +101,6 @@ export default function AdminBonusConfigScreen({ navigation }) {
   const [originalValues, setOriginalValues] = useState({});
   const [lastUpdatedInfo, setLastUpdatedInfo] = useState(null);
 
-  const [rewardThreshold, setRewardThreshold] = useState('15');
-  const [rewardAmount, setRewardAmount] = useState('0');
-  const [originalRewardThreshold, setOriginalRewardThreshold] = useState('15');
-  const [originalRewardAmount, setOriginalRewardAmount] = useState('0');
-  const [savingReward, setSavingReward] = useState(false);
-  const [rewardActive, setRewardActive] = useState(true);
-  const [originalRewardActive, setOriginalRewardActive] = useState(true);
-
-  const [promoActive, setPromoActive] = useState(false);
-  const [promoTitle, setPromoTitle] = useState('');
-  const [promoMessage, setPromoMessage] = useState('');
   const [promoStartDate, setPromoStartDate] = useState('');
   const [promoEndDate, setPromoEndDate] = useState('');
   const [savingPromo, setSavingPromo] = useState(false);
@@ -148,20 +137,6 @@ export default function AdminBonusConfigScreen({ navigation }) {
 
         setValues(percentValues);
         setOriginalValues(percentValues);
-
-        const getRewardStatus = httpsCallable(functions, 'getMonthlyRewardStatus');
-        const rewardRes = await getRewardStatus();
-        if (rewardRes.data) {
-          const t = String(rewardRes.data.threshold || 15);
-          const a = String(rewardRes.data.rewardAmount || 0);
-          setRewardThreshold(t);
-          setRewardAmount(a);
-          setOriginalRewardThreshold(t);
-          setOriginalRewardAmount(a);
-          const sysActive = rewardRes.data.systemActive !== false;
-          setRewardActive(sysActive);
-          setOriginalRewardActive(sysActive);
-        }
 
         const getPromoConfig = httpsCallable(functions, 'getPromotionConfigForAdmin');
         const promoRes = await getPromoConfig();
@@ -242,41 +217,6 @@ export default function AdminBonusConfigScreen({ navigation }) {
       showAlert('Error', err.message || 'Failed to save bonus rates.');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const rewardHasChanges = rewardThreshold !== originalRewardThreshold || rewardAmount !== originalRewardAmount || rewardActive !== originalRewardActive;
-
-  const handleSaveReward = async () => {
-    const thresholdNum = parseInt(rewardThreshold, 10);
-    const amountNum = parseFloat(rewardAmount);
-
-    if (isNaN(thresholdNum) || thresholdNum <= 0) {
-      showAlert('Invalid Value', 'Direct referrals required must be a positive whole number.');
-      return;
-    }
-    if (isNaN(amountNum) || amountNum < 0) {
-      showAlert('Invalid Value', 'Reward amount must be a valid positive number.');
-      return;
-    }
-
-    setSavingReward(true);
-    try {
-      const updateConfig = httpsCallable(functions, 'updateMonthlyRewardConfig');
-      const res = await updateConfig({ directReferralThreshold: thresholdNum, rewardAmount: amountNum, active: rewardActive });
-      const newConfig = res.data.config;
-      const t = String(newConfig.directReferralThreshold);
-      const a = String(newConfig.rewardAmount);
-      setRewardThreshold(t);
-      setRewardAmount(a);
-      setOriginalRewardThreshold(t);
-      setOriginalRewardAmount(a);
-      setOriginalRewardActive(rewardActive);
-      showAlert('Saved', 'Monthly reward requirements updated. Every user\'s eligibility on the Team screen updates automatically.');
-    } catch (err) {
-      showAlert('Error', err.message || 'Failed to save reward settings.');
-    } finally {
-      setSavingReward(false);
     }
   };
 
@@ -391,82 +331,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
               </View>
             ))}
 
-            <View style={currentStyles.infoBox}>
-              <View style={styles.infoHeaderRow}>
-                <MaterialCommunityIcons name="cash-multiple" size={18} color="#EAB308" />
-                <Text style={currentStyles.infoTitle}>Monthly Reward Settings</Text>
-              </View>
-              <Text style={currentStyles.infoDescription}>
-                Sets the eligibility requirement shown on every user's Team screen. Changing this instantly updates whether each user's claim button is enabled.
-              </Text>
-            </View>
-
-            <View style={[currentStyles.fieldCard, styles.promoToggleRow]}>
-              <Text style={currentStyles.fieldLabel}>Monthly Reward System Active</Text>
-              <Switch value={rewardActive} onValueChange={setRewardActive} trackColor={{ true: '#EAB308' }} />
-            </View>
-
-            <View style={currentStyles.fieldCard}>
-              <View style={styles.fieldHeaderRow}>
-                <View style={styles.fieldIconCircle}>
-                  <MaterialCommunityIcons name="account-group-outline" size={16} color="#3B82F6" />
-                </View>
-                <Text style={currentStyles.fieldLabel}>Direct Referrals Required</Text>
-              </View>
-              <Text style={currentStyles.fieldDescription}>Number of ACTIVE direct referrals (balance $70+) a user needs to unlock the claim button.</Text>
-              <View style={currentStyles.inputRow}>
-                <TextInput
-                  style={currentStyles.percentInput}
-                  keyboardType="number-pad"
-                  value={rewardThreshold}
-                  onChangeText={(text) => setRewardThreshold(text.replace(/[^0-9]/g, ''))}
-                  placeholder="15"
-                  placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                />
-              </View>
-            </View>
-
-            <View style={currentStyles.fieldCard}>
-              <View style={styles.fieldHeaderRow}>
-                <View style={styles.fieldIconCircle}>
-                  <MaterialCommunityIcons name="cash" size={16} color="#3B82F6" />
-                </View>
-                <Text style={currentStyles.fieldLabel}>Reward Amount (USDT)</Text>
-              </View>
-              <Text style={currentStyles.fieldDescription}>Amount credited to a user's balance once their claim is approved.</Text>
-              <View style={currentStyles.inputRow}>
-                <TextInput
-                  style={currentStyles.percentInput}
-                  keyboardType="decimal-pad"
-                  value={rewardAmount}
-                  onChangeText={(text) => setRewardAmount(text.replace(/[^0-9.]/g, ''))}
-                  placeholder="50"
-                  placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                />
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.saveButton, !rewardHasChanges && styles.saveButtonDisabled, { marginBottom: 12 }]}
-              onPress={handleSaveReward}
-              disabled={savingReward || !rewardHasChanges}
-            >
-              {savingReward ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.saveButtonText}>
-                  {rewardHasChanges ? 'Save Reward Settings' : 'No Reward Changes to Save'}
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.viewClaimsButton}
-              onPress={() => navigation.navigate('AdminRewardClaimsScreen')}
-            >
-              <MaterialCommunityIcons name="clipboard-list-outline" size={16} color="#3B82F6" style={{ marginRight: 8 }} />
-              <Text style={styles.viewClaimsButtonText}>View Reward Claims</Text>
-            </TouchableOpacity>
+            
 
             <View style={currentStyles.infoBox}>
               <View style={styles.infoHeaderRow}>
