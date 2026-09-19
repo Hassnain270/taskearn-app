@@ -203,6 +203,7 @@ const DEFAULT_BONUS_RATES = {
   indirectReferralRate: 0.05,
   vipUpgradeRate: 0.05,
   dailyTaskProfitRate: 0.0032,
+  weeklyTargetPercent: 21,
 };
 
 async function getBonusRates(db) {
@@ -216,6 +217,7 @@ async function getBonusRates(db) {
         indirectReferralRate: typeof data.indirectReferralRate === "number" ? data.indirectReferralRate : DEFAULT_BONUS_RATES.indirectReferralRate,
         vipUpgradeRate: typeof data.vipUpgradeRate === "number" ? data.vipUpgradeRate : DEFAULT_BONUS_RATES.vipUpgradeRate,
         dailyTaskProfitRate: typeof data.dailyTaskProfitRate === "number" ? data.dailyTaskProfitRate : DEFAULT_BONUS_RATES.dailyTaskProfitRate,
+        weeklyTargetPercent: typeof data.weeklyTargetPercent === "number" ? data.weeklyTargetPercent : DEFAULT_BONUS_RATES.weeklyTargetPercent,
       };
     }
   } catch (e) {
@@ -3097,6 +3099,7 @@ exports.updateBonusConfig = onCall(async (request) => {
   const indirectReferralRate = data.indirectReferralRate;
   const vipUpgradeRate = data.vipUpgradeRate;
   const dailyTaskProfitRate = data.dailyTaskProfitRate;
+  const weeklyTargetPercent = data.weeklyTargetPercent;
   const updates = {};
 
   const validateRate = (name, value, max) => {
@@ -3112,6 +3115,7 @@ exports.updateBonusConfig = onCall(async (request) => {
   validateRate("indirectReferralRate", indirectReferralRate, 1);
   validateRate("vipUpgradeRate", vipUpgradeRate, 1);
   validateRate("dailyTaskProfitRate", dailyTaskProfitRate, 0.1);
+  validateRate("weeklyTargetPercent", weeklyTargetPercent, 100);
 
   if (Object.keys(updates).length === 0) {
     throw new HttpsError("invalid-argument", "No valid rate fields were provided.");
