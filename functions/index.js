@@ -3132,6 +3132,64 @@ exports.updateBonusConfig = onCall(async (request) => {
 // Admin sends a pre-written, editable notification to everyone.
 // type: "app_update" | "promotion" | "custom"
 // For "promotion": promoDetails { startDate, endDate, bonusPercent } is stored too.
+// ============================================================
+// ANNOUNCEMENTS -- separate from notifications. Shown on the
+// "Announcements" screen (Menu -> Announcements), a simple
+// chronological list with no unread badge or push. Notifications
+// (Bell icon) are for timely, personal-feeling alerts; Announcements
+// are the durable, official record of company news.
+// ============================================================
+
+exports.sendAnnouncement = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may send announcements.");
+  }
+
+  const data = request.data || {};
+  const title = (data.title || "").trim();
+  const message = (data.message || "").trim();
+
+  if (!title || !message) {
+    throw new HttpsError("invalid-argument", "Title and message are required.");
+  }
+
+  const ref = await db.collection("announcements").add({
+    title: title,
+    message: message,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdBy: request.auth.uid,
+  });
+
+  return { success: true, id: ref.id };
+});
+
+exports.getAnnouncements = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+
+  const snap = await db.collection("announcements")
+    .orderBy("createdAt", "desc")
+    .limit(50)
+    .get();
+
+  const toMillis = (ts) => (ts && typeof ts.toMillis === "function") ? ts.toMillis() : 0;
+
+  const announcements = snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      title: data.title,
+      message: data.message,
+      createdAt: toMillis(data.createdAt),
+    };
+  });
+
+  return { success: true, announcements: announcements };
+});
+
 exports.sendAdminNotification = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
