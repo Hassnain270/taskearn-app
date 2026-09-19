@@ -21,6 +21,8 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 
 const functionsInstance = getFunctions();
 
@@ -152,6 +154,7 @@ const formatPercent = (rate) => {
 };
 
 export default function HomeScreen({ navigation, route }) {
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const { isDarkMode, toggleTheme } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
   const [username, setUsername] = useState("Loading...");
@@ -270,6 +273,47 @@ export default function HomeScreen({ navigation, route }) {
       }
     };
     loadActivationStatus();
+
+    const registerForPush = async () => {
+      try {
+        if (!Device.isDevice) return;
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        if (finalStatus !== 'granted') return;
+
+        const tokenResponse = await Notifications.getExpoPushTokenAsync();
+        const expoPushToken = tokenResponse.data;
+
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'default',
+            importance: Notifications.AndroidImportance.DEFAULT,
+          });
+        }
+
+        const saveToken = httpsCallable(functionsInstance, 'saveUserPushToken');
+        await saveToken({ expoPushToken });
+      } catch (err) {
+        // Push registration is best-effort -- never block the Home screen.
+      }
+    };
+    registerForPush();
+
+    const loadUnreadCount = async () => {
+      try {
+        const getMyNotifications = httpsCallable(functionsInstance, 'getMyNotifications');
+        const res = await getMyNotifications();
+        const list = (res.data && res.data.notifications) || [];
+        setUnreadNotifCount(list.filter((n) => n.unread).length);
+      } catch (err) {
+        // Non-critical -- badge just won't show a count this time.
+      }
+    };
+    loadUnreadCount();
 
     const loadPromotion = async () => {
       try {
@@ -411,6 +455,11 @@ export default function HomeScreen({ navigation, route }) {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('NotificationsScreen')} style={styles.headerIcon}>
             <Feather color={isDarkMode ? "#E2E8F0" : "#1E293B"} name="bell" size={22} />
+            {unreadNotifCount > 0 && (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>{unreadNotifCount > 9 ? '9+' : unreadNotifCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -662,6 +711,8 @@ const styles = StyleSheet.create({
   logoImage: { width: '100%', height: '100%' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerIcon: { padding: 4, marginLeft: 10 },
+  notifBadge: { position: 'absolute', top: 0, right: 4, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3 },
+  notifBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   profileRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, marginBottom: 12 },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E', marginRight: 6 },
   walletCard: { backgroundColor: '#3B82F6', borderRadius: 24, padding: 24, marginBottom: 16 },
