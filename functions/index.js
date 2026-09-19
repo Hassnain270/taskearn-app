@@ -3387,7 +3387,88 @@ exports.checkAndSendTeamReminders = onSchedule(
   }
 );
 
-// (Monthly Reward system removed -- replaced by the Weekly Team Leader/Supervisor/Manager target system)
+// ============================================================
+// TEAM LEADER / SUPERVISOR / MANAGER -- automatic promotion.
+// Runs daily. A user's rank never decreases once earned; only
+// upgrades happen (leapfrogging straight to Manager is allowed if
+// they qualify directly). Each level's own reward rate is what
+// applies going forward -- ranks don't stack.
+// ============================================================
+const RANK_REQUIREMENTS = {
+  team_leader: { directCount: 12, subCount: 5, subDirectRequirement: 2, rewardPerJoining: 1 },
+  supervisor: { directCount: 25, subCount: 10, subDirectRequirement: 3, rewardPerJoining: 2 },
+  manager: { directCount: 50, subCount: 25, subDirectRequirement: 5, rewardPerJoining: 3 },
+};
+const RANK_ORDER = ["none", "team_leader", "supervisor", "manager"];
+
+function checkRankQualification(directMembers, allUsersByReferralCode, rankKey) {
+  const req = RANK_REQUIREMENTS[rankKey];
+  const activeDirect = directMembers.filter((m) => isBalanceActive(m));
+  if (activeDirect.length < req.directCount) return false;
+
+  let qualifyingSubCount = 0;
+  for (const member of activeDirect) {
+    const memberCode = member.referralCode || member.referral;
+    if (!memberCode) continue;
+    const memberDirects = allUsersByReferralCode[memberCode] || [];
+    const activeMemberDirects = memberDirects.filter((m) => isBalanceActive(m));
+    if (activeMemberDirects.length >= req.subDirectRequirement) {
+      qualifyingSubCount++;
+    }
+  }
+  return qualifyingSubCount >= req.subCount;
+}
+
+exports.checkAndPromoteTeamRanks = onSchedule(
+  { schedule: "every 24 hours" },
+  async () => {
+    const db = admin.firestore();
+    const usersSnap = await db.collection("users").get();
+    const allUsers = usersSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+    const usersByReferralCode = {};
+    allUsers.forEach((u) => {
+      const code = u.referralCode || u.referral;
+      if (!code) return;
+      const parentCode = u.referredBy;
+      if (!parentCode) return;
+      if (!usersByReferralCode[parentCode]) usersByReferralCode[parentCode] = [];
+      usersByReferralCode[parentCode].push(u);
+    });
+
+    for (const user of allUsers) {
+      if (user.isAdmin === true) continue;
+      const myCode = user.referralCode || user.referral;
+      if (!myCode) continue;
+
+      const directMembers = usersByReferralCode[myCode] || [];
+      const currentRank = user.teamRank || "none";
+
+      let newRank = currentRank;
+      if (checkRankQualification(directMembers, usersByReferralCode, "manager")) {
+        newRank = "manager";
+      } else if (checkRankQualification(directMembers, usersByReferralCode, "supervisor")) {
+        newRank = "supervisor";
+      } else if (checkRankQualification(directMembers, usersByReferralCode, "team_leader")) {
+        newRank = "team_leader";
+      }
+
+      if (RANK_ORDER.indexOf(newRank) > RANK_ORDER.indexOf(currentRank)) {
+        await db.collection("users").doc(user.id).update({ teamRank: newRank });
+
+        const rankLabel = newRank === "manager" ? "Team Manager" : newRank === "supervisor" ? "Team Supervisor" : "Team Leader";
+        const rewardRate = RANK_REQUIREMENTS[newRank].rewardPerJoining;
+        await createPersonalNotification(
+          db,
+          user.id,
+          "Congratulations! You're Now a " + rankLabel,
+          "You've been promoted to " + rankLabel + "! You'll now earn $" + rewardRate + " for every active joining across your entire team when you hit your weekly target. Your first weekly target starts next Monday -- keep building your team!",
+          "team_rank_promotion"
+        );
+      }
+    }
+  }
+);
 
 exports.chatWithSupportAI = onCall(
   { secrets: ["GROQ_API_KEY"] },
