@@ -408,6 +408,22 @@ async function notifyAdminsOfNewWithdrawal(db, args) {
   }
 }
 
+exports.saveUserPushToken = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+
+  const expoPushToken = request.data ? request.data.expoPushToken : undefined;
+  if (!expoPushToken || typeof expoPushToken !== "string") {
+    throw new HttpsError("invalid-argument", "A valid push token is required.");
+  }
+
+  const db = admin.firestore();
+  await db.collection("users").doc(request.auth.uid).update({
+    userExpoPushToken: expoPushToken,
+  });
+
+  return { success: true };
+});
+
 exports.saveAdminPushToken = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
@@ -3156,6 +3172,31 @@ exports.sendAdminNotification = onCall(async (request) => {
   }
 
   const ref = await db.collection("notifications").add(notifDoc);
+
+  try {
+    const usersSnap = await db.collection("users").get();
+    const tokens = [];
+    usersSnap.forEach((docSnap) => {
+      const t = docSnap.data().userExpoPushToken;
+      if (t) tokens.push(t);
+    });
+    if (tokens.length > 0) {
+      const messages = tokens.map((t) => ({
+        to: t,
+        sound: "default",
+        title: title,
+        body: message,
+        data: { type: type, notificationId: ref.id },
+      }));
+      const batchSize = 90;
+      for (let i = 0; i < messages.length; i += batchSize) {
+        await sendExpoPushMessages(messages.slice(i, i + batchSize));
+      }
+    }
+  } catch (pushErr) {
+    console.error("Failed to push broadcast notification:", pushErr.message);
+  }
+
   return { success: true, id: ref.id };
 });
 
@@ -3223,7 +3264,7 @@ exports.markNotificationsRead = onCall(async (request) => {
 // Used by the team-building reminder job below, and later by the Team
 // Leader/Supervisor/Manager promotion system.
 async function createPersonalNotification(db, targetUid, title, message, type) {
-  await db.collection("notifications").add({
+  const ref = await db.collection("notifications").add({
     title: title,
     message: message,
     type: type,
@@ -3232,6 +3273,22 @@ async function createPersonalNotification(db, targetUid, title, message, type) {
     actionType: "none",
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+
+  try {
+    const userDoc = await db.collection("users").doc(targetUid).get();
+    const token = userDoc.exists ? userDoc.data().userExpoPushToken : null;
+    if (token) {
+      await sendExpoPushMessages([{
+        to: token,
+        sound: "default",
+        title: title,
+        body: message,
+        data: { type: type, notificationId: ref.id },
+      }]);
+    }
+  } catch (pushErr) {
+    console.error("Failed to push personal notification to " + targetUid + ":", pushErr.message);
+  }
 }
 
 // Runs daily: finds accounts that have withdrawn more than they've
