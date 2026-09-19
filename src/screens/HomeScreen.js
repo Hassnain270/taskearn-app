@@ -502,7 +502,7 @@ export default function HomeScreen({ navigation, route }) {
             { title: 'VIP Levels', icon: 'crown', color: '#EAB308', iconSet: 'FontAwesome5' },
             { title: 'History', icon: 'history', color: '#3B82F6', iconSet: 'FontAwesome5' },
             { title: 'Invitation', icon: 'user-plus', color: '#10B981', iconSet: 'FontAwesome5' },
-            { title: 'Notices', icon: 'bell', color: '#EF4444', iconSet: 'FontAwesome5' },
+            { title: 'Announcements', icon: 'bullhorn', color: '#EF4444', iconSet: 'FontAwesome5' },
             { title: 'About Us', icon: 'information', color: '#8B5CF6', iconSet: 'MaterialCommunityIcons' },
             { title: 'Download App', icon: 'download', color: '#EC4899', iconSet: 'FontAwesome5' }
           ].map((item, index) => (
@@ -511,7 +511,7 @@ export default function HomeScreen({ navigation, route }) {
               else if (item.title === 'History') navigation.navigate('History');
               else if (item.title === 'About Us') navigation.navigate('AboutUs');
               else if (item.title === 'Invitation') navigation.navigate('Invitation', { userUid });
-              else if (item.title === 'Notices') navigation.navigate('Notices');
+              else if (item.title === 'Announcements') navigation.navigate('Notices');
               else if (item.title === 'Download App') handleDownloadApp();
             }}>
               <View style={currentStyles.menuIconContainer}>
