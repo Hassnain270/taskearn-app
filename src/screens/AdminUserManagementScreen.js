@@ -319,36 +319,6 @@ export default function AdminUserManagementScreen({ navigation }) {
     );
   };
 
-  const handleFixUsername = async () => {
-    if (!selectedDetail) return;
-    const cleaned = String(selectedDetail.username || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
-    try {
-      const fixFn = httpsCallable(functions, 'adminFixUsername');
-      const res = await fixFn({ uid: selectedDetail.uid, newUsername: cleaned });
-      showAlert('Fixed', 'Username cleaned to: ' + res.data.cleanedUsername);
-      closeDetailModal();
-      handleSearch();
-    } catch (err) {
-      showAlert('Error', err.message || 'Failed to fix username.');
-    }
-  };
-
-  const handleInspectIdentifier = async () => {
-    if (!selectedDetail) return;
-    try {
-      const inspectFn = httpsCallable(functions, 'adminInspectIdentifier');
-      const res = await inspectFn({ uid: selectedDetail.uid });
-      const d = res.data;
-      showAlert(
-        'Raw Character Inspection',
-        'Username: "' + d.username + '" (length ' + d.usernameLength + ')\nChar codes: ' + d.usernameCharCodes.join(',') +
-        '\n\nEmail: "' + d.email + '" (length ' + d.emailLength + ')\nChar codes: ' + d.emailCharCodes.join(',')
-      );
-    } catch (err) {
-      showAlert('Error', err.message || 'Failed to inspect identifier.');
-    }
-  };
-
   const formatDate = (millis) => {
     if (!millis) return 'Not recorded';
     return new Date(millis).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -617,14 +587,6 @@ export default function AdminUserManagementScreen({ navigation }) {
                       <TouchableOpacity style={styles.saveBtn} onPress={handleSaveChanges} disabled={saving}>
                         {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
                       </TouchableOpacity>
-
-                      <TouchableOpacity style={styles.saveBtn} onPress={handleInspectIdentifier}>
-                    <Text style={styles.saveBtnText}>Inspect Hidden Characters (Debug)</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.saveBtn} onPress={handleFixUsername}>
-                    <Text style={styles.saveBtnText}>Remove Special Characters From Username</Text>
-                  </TouchableOpacity>
 
                   <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteUser} disabled={deleting}>
                         {deleting ? <ActivityIndicator color="#EF4444" /> : <Text style={styles.deleteBtnText}>Delete This Account</Text>}
