@@ -138,6 +138,10 @@ export default function AdminBonusConfigScreen({ navigation }) {
         setValues(percentValues);
         setOriginalValues(percentValues);
 
+        const wtp = String(data.weeklyTargetPercent ?? 21);
+        setWeeklyTargetPercent(wtp);
+        setOriginalWeeklyTargetPercent(wtp);
+
         const getPromoConfig = httpsCallable(functions, 'getPromotionConfigForAdmin');
         const promoRes = await getPromoConfig();
         if (promoRes.data) {
@@ -166,6 +170,9 @@ export default function AdminBonusConfigScreen({ navigation }) {
 
   const hasChanges = RATE_FIELDS.some((field) => values[field.key] !== originalValues[field.key]);
 
+  const [weeklyTargetPercent, setWeeklyTargetPercent] = useState('21');
+  const [originalWeeklyTargetPercent, setOriginalWeeklyTargetPercent] = useState('21');
+
   const handleSave = async () => {
     const updates = {};
     let validationError = null;
@@ -191,6 +198,15 @@ export default function AdminBonusConfigScreen({ navigation }) {
       return;
     }
 
+    if (weeklyTargetPercent !== originalWeeklyTargetPercent) {
+      const wtpNum = parseFloat(weeklyTargetPercent);
+      if (isNaN(wtpNum) || wtpNum < 0 || wtpNum > 100) {
+        showAlert('Invalid Value', 'Weekly Target Percent must be between 0 and 100.');
+        return;
+      }
+      updates.weeklyTargetPercent = wtpNum;
+    }
+
     if (Object.keys(updates).length === 0) {
       showAlert('No Changes', 'You haven\'t changed any values yet.');
       return;
@@ -210,6 +226,7 @@ export default function AdminBonusConfigScreen({ navigation }) {
 
       setValues(percentValues);
       setOriginalValues(percentValues);
+      setOriginalWeeklyTargetPercent(String(newRates.weeklyTargetPercent ?? weeklyTargetPercent));
       setLastUpdatedInfo(new Date());
 
       showAlert('Saved', 'Bonus rates updated successfully. New rates apply immediately across the app.');
@@ -412,6 +429,35 @@ export default function AdminBonusConfigScreen({ navigation }) {
                 <Text style={styles.saveButtonText}>Save Promotion</Text>
               )}
             </TouchableOpacity>
+
+            <View style={currentStyles.infoBox}>
+              <View style={styles.infoHeaderRow}>
+                <MaterialCommunityIcons name="account-star-outline" size={18} color="#8B5CF6" />
+                <Text style={currentStyles.infoTitle}>Weekly Team Target</Text>
+              </View>
+              <Text style={currentStyles.infoDescription}>
+                The percentage of a Team Leader/Supervisor/Manager's current active team size used to calculate their weekly new-joining target every Monday.
+              </Text>
+            </View>
+
+            <View style={currentStyles.fieldCard}>
+              <View style={styles.fieldHeaderRow}>
+                <View style={styles.fieldIconCircle}>
+                  <MaterialCommunityIcons name="percent-outline" size={16} color="#8B5CF6" />
+                </View>
+                <Text style={currentStyles.fieldLabel}>Weekly Target Percent</Text>
+              </View>
+              <View style={currentStyles.inputRow}>
+                <TextInput
+                  style={currentStyles.percentInput}
+                  keyboardType="decimal-pad"
+                  value={weeklyTargetPercent}
+                  onChangeText={(text) => setWeeklyTargetPercent(text.replace(/[^0-9.]/g, ''))}
+                  placeholder="21"
+                  placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                />
+              </View>
+            </View>
 
             {lastUpdatedInfo && (
               <Text style={styles.lastUpdatedText}>
