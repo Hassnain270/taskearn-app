@@ -479,6 +479,14 @@ export default function AdminUserManagementScreen({ navigation }) {
                           <Text style={styles.infoLabel}>Referred By</Text>
                           <Text style={currentStyles.infoValue}>{selectedDetail.referrerUsername || 'None'}</Text>
                         </View>
+                        {selectedDetail.uplineRankUsername && (
+                          <View style={styles.infoRow}>
+                            <Text style={styles.infoLabel}>
+                              {selectedDetail.uplineRank === 'manager' ? 'Team Manager' : selectedDetail.uplineRank === 'supervisor' ? 'Team Supervisor' : 'Team Leader'}
+                            </Text>
+                            <Text style={currentStyles.infoValue}>{selectedDetail.uplineRankUsername}</Text>
+                          </View>
+                        )}
                         <View style={styles.infoRow}>
                           <Text style={styles.infoLabel}>Total Earnings</Text>
                           <Text style={currentStyles.infoValue}>${selectedDetail.totalEarnings.toFixed(2)}</Text>
