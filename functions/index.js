@@ -1551,6 +1551,36 @@ exports.adminDeleteUser = onCall(async (request) => {
   return { success: true };
 });
 
+// Lets an admin set a temporary password directly on a user's Firebase
+// Auth account -- for cases where OTP delivery or Forgot Password isn't
+// working for that user. The user should change it themselves after
+// logging in.
+exports.adminSetUserPassword = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may set a user's password.");
+  }
+
+  const data = request.data || {};
+  const targetUid = data.uid;
+  const newPassword = data.newPassword;
+
+  if (!targetUid) throw new HttpsError("invalid-argument", "A user UID is required.");
+  if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+    throw new HttpsError("invalid-argument", "Password must be at least 6 characters long.");
+  }
+
+  try {
+    await admin.auth().updateUser(targetUid, { password: newPassword });
+  } catch (err) {
+    throw new HttpsError("internal", err.message || "Failed to update the user's password.");
+  }
+
+  return { success: true };
+});
+
 exports.adminUpdateUserData = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
