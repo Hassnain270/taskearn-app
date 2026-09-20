@@ -789,6 +789,24 @@ exports.adminGetUserDetail = onCall(async (request) => {
 
   const usersSnapshot = await db.collection("users").get();
   const allUsers = usersSnapshot.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const allUsersByUid = {};
+  allUsers.forEach((u) => { allUsersByUid[u.id] = u; });
+
+  let uplineRankUsername = null;
+  let uplineRank = null;
+  let walkUid = userData.referredByUid || null;
+  let safetyCounter = 0;
+  while (walkUid && safetyCounter < 50) {
+    const walkUser = allUsersByUid[walkUid];
+    if (!walkUser) break;
+    if (walkUser.teamRank) {
+      uplineRankUsername = walkUser.username || walkUid;
+      uplineRank = walkUser.teamRank;
+      break;
+    }
+    walkUid = walkUser.referredByUid || null;
+    safetyCounter++;
+  }
 
   const directMembers = allUsers.filter((u) => u.referredByUid === uid);
   const directTeamCount = directMembers.length;
@@ -875,6 +893,8 @@ exports.adminGetUserDetail = onCall(async (request) => {
       monthJoinings: monthJoinings,
       monthLabel: monthLabel,
       referrerUsername: referrerUsername,
+      uplineRankUsername: uplineRankUsername,
+      uplineRank: uplineRank,
       isAdmin: userData.isAdmin === true,
       restrictedTasksMode: userData.restrictedTasksMode === true,
     },
