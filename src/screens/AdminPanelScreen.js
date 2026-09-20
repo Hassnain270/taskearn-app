@@ -145,14 +145,16 @@ export default function AdminPanelScreen({ navigation }) {
                 <Text style={styles.statsLabel}>Total Registered</Text>
                 <Text style={[styles.statsValue, { color: '#3B82F6' }]}>{platformStats.totalRegisteredUsers}</Text>
               </View>
-              <View style={styles.statsBox}>
+              <TouchableOpacity style={styles.statsBox} onPress={() => navigation.navigate('AdminUsersByStatusScreen', { status: 'active' })}>
                 <Text style={styles.statsLabel}>Active</Text>
                 <Text style={[styles.statsValue, { color: '#22C55E' }]}>{platformStats.totalActiveUsers}</Text>
-              </View>
-              <View style={styles.statsBox}>
+                <Text style={styles.statsTapHint}>Tap to view</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.statsBox} onPress={() => navigation.navigate('AdminUsersByStatusScreen', { status: 'inactive' })}>
                 <Text style={styles.statsLabel}>Inactive</Text>
                 <Text style={[styles.statsValue, { color: '#94A3B8' }]}>{platformStats.totalInactiveUsers}</Text>
-              </View>
+                <Text style={styles.statsTapHint}>Tap to view</Text>
+              </TouchableOpacity>
             </View>
 
             <View style={currentStyles.statsDivider} />
