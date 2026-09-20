@@ -180,13 +180,6 @@ export default function HomeScreen({ navigation, route }) {
   const [indirectReferralRate, setIndirectReferralRate] = useState(0.05);
   const [welcomeBonusRate, setWelcomeBonusRate] = useState(0.07);
 
-  // Promotion popup -- fetched fresh every time Home mounts (i.e. every
-  // app open), so it always reflects whatever the admin currently has
-  // active in Bonus Settings. Nothing is shown if there's no active
-  // promotion right now.
-  const [activePromotion, setActivePromotion] = useState(null);
-  const [showPromotionModal, setShowPromotionModal] = useState(false);
-
   // Shown starting 14 days after registration to any account that has
   // never unlocked VIP1 -- gives the user a fair heads-up before the
   // 30-day automatic cleanup, without alarming brand-new users.
@@ -315,19 +308,6 @@ export default function HomeScreen({ navigation, route }) {
     };
     loadUnreadCount();
 
-    const loadPromotion = async () => {
-      try {
-        const getActivePromotion = httpsCallable(functionsInstance, 'getActivePromotion');
-        const res = await getActivePromotion();
-        if (res.data && res.data.active === true) {
-          setActivePromotion(res.data);
-          setShowPromotionModal(true);
-        }
-      } catch (err) {
-        // No active promotion or fetch failed -- silently skip the popup.
-      }
-    };
-    loadPromotion();
   }, []);
 
   useEffect(() => {
@@ -622,24 +602,6 @@ export default function HomeScreen({ navigation, route }) {
         ))}
       </View>
 
-      {showPromotionModal && activePromotion && (
-        <View style={styles.promoOverlay}>
-          <View style={[styles.promoModalBox, { backgroundColor: isDarkMode ? "#161B22" : "#FFFFFF" }]}>
-            <View style={styles.promoIconCircle}>
-              <MaterialCommunityIcons name="gift-outline" size={32} color="#EAB308" />
-            </View>
-            <Text style={[styles.promoModalTitle, { color: isDarkMode ? "#FFFFFF" : "#1E293B" }]}>
-              {activePromotion.title}
-            </Text>
-            <Text style={[styles.promoModalMessage, { color: isDarkMode ? "#94A3B8" : "#64748B" }]}>
-              {activePromotion.message}
-            </Text>
-            <TouchableOpacity style={styles.promoModalBtn} onPress={() => setShowPromotionModal(false)}>
-              <Text style={styles.promoModalBtnText}>Got It</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
