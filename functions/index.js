@@ -3685,6 +3685,32 @@ exports.checkAndPromoteTeamRanks = onSchedule(
   }
 );
 
+const GROQ_MODEL_CHAIN = [
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3-32b",
+];
+
+async function tryGroqModels(groq, messages, maxTokens) {
+  let lastError = null;
+  for (const model of GROQ_MODEL_CHAIN) {
+    try {
+      const completion = await groq.chat.completions.create({
+        messages: messages,
+        model: model,
+        temperature: 0.3,
+        max_tokens: maxTokens,
+      });
+      const text = completion.choices[0] && completion.choices[0].message && completion.choices[0].message.content;
+      if (text) return text;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("All Groq models failed.");
+}
+
+
 exports.chatWithSupportAI = onCall(
   { secrets: ["GROQ_API_KEY"] },
   async (request) => {
