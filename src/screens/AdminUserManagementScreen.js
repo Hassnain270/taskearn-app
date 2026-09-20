@@ -155,6 +155,7 @@ export default function AdminUserManagementScreen({ navigation }) {
 
   const [tempPassword, setTempPassword] = useState('');
   const [settingPassword, setSettingPassword] = useState(false);
+  const [showTempPassword, setShowTempPassword] = useState(false);
 
   const handleSetPassword = async () => {
     if (!selectedDetail) return;
@@ -615,14 +616,19 @@ export default function AdminUserManagementScreen({ navigation }) {
                       <View style={currentStyles.infoBox}>
                         <Text style={currentStyles.infoValue}>Set Temporary Password</Text>
                         <Text style={styles.joiningNote}>Use when a user can't log in and OTP/Forgot Password isn't working. They should change it themselves after logging in.</Text>
-                        <TextInput
-                          style={[currentStyles.editInput, { marginTop: 10 }]}
-                          value={tempPassword}
-                          onChangeText={setTempPassword}
-                          placeholder="New temporary password (min 6 chars)"
-                          placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
-                          secureTextEntry
-                        />
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
+                          <TextInput
+                            style={[currentStyles.editInput, { flex: 1 }]}
+                            value={tempPassword}
+                            onChangeText={setTempPassword}
+                            placeholder="New temporary password (min 6 chars)"
+                            placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                            secureTextEntry={!showTempPassword}
+                          />
+                          <TouchableOpacity onPress={() => setShowTempPassword(!showTempPassword)} style={{ marginLeft: -36, padding: 8 }}>
+                            <Feather name={showTempPassword ? 'eye-off' : 'eye'} size={18} color={isDarkMode ? "#94A3B8" : "#64748B"} />
+                          </TouchableOpacity>
+                        </View>
                         <TouchableOpacity style={[styles.saveBtn, { marginTop: 10 }]} onPress={handleSetPassword} disabled={settingPassword}>
                           {settingPassword ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Set Password</Text>}
                         </TouchableOpacity>
