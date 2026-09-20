@@ -1359,6 +1359,22 @@ exports.adminGetUsersByStatus = onCall(async (request) => {
     return status === "active" ? isBalanceActive(u) : !isBalanceActive(u);
   });
 
+  // totalDeposited (a field only populated by deposits made after it
+  // was introduced) is unreliable for older accounts -- so the actual
+  // lifetime deposit total is computed here from the transactions
+  // collection instead, the same source of truth Admin All Deposits uses.
+  const depositSnap = await db.collection("transactions")
+    .where("type", "==", "DEPOSIT")
+    .where("status", "==", "approved")
+    .get();
+  const depositTotalsByUid = {};
+  depositSnap.forEach((d) => {
+    const data = d.data();
+    const uid = data.userId;
+    const amt = Number(data.amount || 0);
+    depositTotalsByUid[uid] = (depositTotalsByUid[uid] || 0) + amt;
+  });
+
   const results = filtered.map((u) => {
     let referrerUsername = null;
     if (u.referredByUid && usersByUid[u.referredByUid]) {
@@ -1368,7 +1384,7 @@ exports.adminGetUsersByStatus = onCall(async (request) => {
       uid: u.id,
       username: u.username || u.id,
       createdAt: getMemberTimestamp(u.createdAt),
-      totalDeposited: Number(u.totalDeposited || 0),
+      totalDeposited: Number(depositTotalsByUid[u.id] || 0),
       referrerUsername: referrerUsername,
     };
   });
