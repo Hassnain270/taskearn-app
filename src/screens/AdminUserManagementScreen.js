@@ -153,6 +153,28 @@ export default function AdminUserManagementScreen({ navigation }) {
     setBalanceReason('');
   };
 
+  const [tempPassword, setTempPassword] = useState('');
+  const [settingPassword, setSettingPassword] = useState(false);
+
+  const handleSetPassword = async () => {
+    if (!selectedDetail) return;
+    if (!tempPassword || tempPassword.length < 6) {
+      showAlert('Invalid Password', 'Password must be at least 6 characters long.');
+      return;
+    }
+    setSettingPassword(true);
+    try {
+      const setPasswordFn = httpsCallable(functions, 'adminSetUserPassword');
+      await setPasswordFn({ uid: selectedDetail.uid, newPassword: tempPassword });
+      showAlert('Password Set', 'The user can now log in with this temporary password. Advise them to change it after logging in.');
+      setTempPassword('');
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to set password.');
+    } finally {
+      setSettingPassword(false);
+    }
+  };
+
   const handleToggleRestriction = async (value) => {
     if (!selectedDetail) return;
     setRestrictedTasksMode(value);
@@ -588,6 +610,22 @@ export default function AdminUserManagementScreen({ navigation }) {
                           </View>
                           <Switch value={restrictedTasksMode} onValueChange={handleToggleRestriction} trackColor={{ true: '#EF4444' }} />
                         </View>
+                      </View>
+
+                      <View style={currentStyles.infoBox}>
+                        <Text style={currentStyles.infoValue}>Set Temporary Password</Text>
+                        <Text style={styles.joiningNote}>Use when a user can't log in and OTP/Forgot Password isn't working. They should change it themselves after logging in.</Text>
+                        <TextInput
+                          style={[currentStyles.editInput, { marginTop: 10 }]}
+                          value={tempPassword}
+                          onChangeText={setTempPassword}
+                          placeholder="New temporary password (min 6 chars)"
+                          placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
+                          secureTextEntry
+                        />
+                        <TouchableOpacity style={[styles.saveBtn, { marginTop: 10 }]} onPress={handleSetPassword} disabled={settingPassword}>
+                          {settingPassword ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Set Password</Text>}
+                        </TouchableOpacity>
                       </View>
 
                       <TouchableOpacity style={styles.saveBtn} onPress={handleSaveChanges} disabled={saving}>
