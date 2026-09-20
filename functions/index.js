@@ -1336,6 +1336,48 @@ exports.adminGetWeeklyTargetHistory = onCall(async (request) => {
   return { success: true, history: history };
 });
 
+// Lists ALL users platform-wide filtered by active/inactive status,
+// with registration date, referrer, and total deposited -- so the
+// admin can see and personally reach out to inactive registrants
+// without opening each user's own team report individually.
+exports.adminGetUsersByStatus = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const status = (request.data && request.data.status) || "active";
+  const usersSnap = await db.collection("users").get();
+  const allUsers = usersSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const usersByUid = {};
+  allUsers.forEach((u) => { usersByUid[u.id] = u; });
+
+  const filtered = allUsers.filter((u) => {
+    if (u.isAdmin === true) return false;
+    return status === "active" ? isBalanceActive(u) : !isBalanceActive(u);
+  });
+
+  const results = filtered.map((u) => {
+    let referrerUsername = null;
+    if (u.referredByUid && usersByUid[u.referredByUid]) {
+      referrerUsername = usersByUid[u.referredByUid].username || null;
+    }
+    return {
+      uid: u.id,
+      username: u.username || u.id,
+      createdAt: getMemberTimestamp(u.createdAt),
+      totalDeposited: Number(u.totalDeposited || 0),
+      referrerUsername: referrerUsername,
+    };
+  });
+
+  results.sort((a, b) => b.createdAt - a.createdAt);
+
+  return { success: true, users: results };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
