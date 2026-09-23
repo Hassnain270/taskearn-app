@@ -47,6 +47,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
 
   const [incomingBalance, setIncomingBalance] = useState(route?.params?.totalBalance || 0.00);
+  const [vipCapitalForLock, setVipCapitalForLock] = useState(route?.params?.totalBalance || 0.00);
   const [completedTaskCount, setCompletedTaskCount] = useState(route?.params?.taskCount || 0);
   const [lastTaskReset, setLastTaskReset] = useState(null);
   const [walletAddress, setWalletAddress] = useState("");
@@ -71,6 +72,8 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
         if (docSnap.exists()) {
           const data = docSnap.data();
           if (data.totalBalance !== undefined) setIncomingBalance(data.totalBalance);
+          const vc = (typeof data.vipCapital === "number") ? data.vipCapital : data.totalBalance;
+          if (vc !== undefined) setVipCapitalForLock(vc);
           if (data.taskCount !== undefined) setCompletedTaskCount(data.taskCount);
           if (data.lastTaskReset) {
             const resetDate = typeof data.lastTaskReset.toDate === 'function'
@@ -150,7 +153,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
 
   const effectiveTaskCount = isStoredCountStale() ? 0 : completedTaskCount;
 
-  const vipLockedCapital = calculateVipLockedCapital(incomingBalance);
+  const vipLockedCapital = calculateVipLockedCapital(vipCapitalForLock);
   const withdrawableBalance = incomingBalance > vipLockedCapital ? parseFloat((incomingBalance - vipLockedCapital).toFixed(2)) : 0.00;
 
   const currentStyles = isDarkMode ? darkStyles : lightStyles;

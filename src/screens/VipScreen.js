@@ -59,7 +59,9 @@ export default function VipScreen({ navigation, route }) {
       const unsubscribe = onSnapshot(userRef, (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
-          setTotalBalance(Number(data.balance || 0));
+          const rawBalance = Number(data.balance || 0);
+          const vipCapital = (typeof data.vipCapital === "number") ? data.vipCapital : rawBalance;
+          setTotalBalance(vipCapital);
           setLastClaimedVipLevel(Number(data.lastClaimedVipLevel || 0));
         }
         setLoading(false);
