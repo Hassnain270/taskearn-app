@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TaskEarn Team Ranks</title>
+<style>
+  :root {
+    --navy: #0B1220;
+    --navy-soft: #121C31;
+    --card: #16223A;
+    --border: #253654;
+    --blue: #4F8CFF;
+    --blue-deep: #2E5FD9;
+    --gold: #F0B94D;
+    --green: #3FCF8E;
+    --text: #EAF0FF;
+    --text-dim: #8CA0C4;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: radial-gradient(1200px 600px at 50% -10%, #1A2B4D 0%, var(--navy) 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 48px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+  }
+  .brand .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--blue), var(--gold));
+  }
+  .brand span { font-size: 13px; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600; }
+  h1 {
+    font-size: 28px; line-height: 1.2; margin: 8px 0 6px;
+    font-weight: 800;
+  }
+  .sub { color: var(--text-dim); font-size: 14.5px; line-height: 1.55; margin-bottom: 24px; max-width: 56ch; }
+
+  .tabs {
+    display: flex; gap: 8px; margin-bottom: 22px;
+    background: var(--navy-soft); padding: 5px; border-radius: 14px; border: 1px solid var(--border);
+  }
+  .tab {
+    flex: 1; text-align: center; padding: 11px 6px; border-radius: 10px;
+    font-size: 13.5px; font-weight: 700; color: var(--text-dim); cursor: pointer;
+    transition: background .2s, color .2s;
+    user-select: none;
+  }
+  .tab.active {
+    background: linear-gradient(135deg, var(--blue-deep), var(--blue));
+    color: white;
+  }
+
+  .panel { display: none; }
+  .panel.active { display: block; animation: rise .35s ease; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .hero {
+    background: linear-gradient(160deg, var(--card), var(--navy-soft));
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: "";
+    position: absolute; right: -60px; top: -60px; width: 180px; height: 180px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--accent, var(--blue)) 0%, transparent 70%);
+    opacity: 0.25;
+  }
+  .rank-icon {
+    width: 52px; height: 52px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent, var(--blue)); font-size: 26px; margin-bottom: 14px;
+  }
+  .rank-name { font-size: 22px; font-weight: 800; margin: 0 0 4px; }
+  .rank-tag { color: var(--text-dim); font-size: 13.5px; margin: 0; }
+
+  .section-title {
+    font-size: 12px; letter-spacing: 0.06em; color: var(--accent, var(--blue));
+    font-weight: 800; margin: 26px 0 10px;
+  }
+
+  .req-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 18px; margin-bottom: 12px;
+  }
+  .req-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .req-num { font-size: 26px; font-weight: 800; color: var(--accent, var(--blue)); min-width: 46px; }
+  .req-text { font-size: 14px; color: var(--text); line-height: 1.5; }
+  .req-text b { color: white; }
+
+  .reward-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px;
+  }
+  .reward-box {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px;
+  }
+  .reward-box .label { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
+  .reward-box .value { font-size: 20px; font-weight: 800; }
+  .reward-box .value.accent { color: var(--accent, var(--blue)); }
+
+  .flow {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px;
+  }
+  .flow-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .flow-row:last-child { border-bottom: none; }
+  .flow-dot {
+    width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+    background: var(--navy-soft); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; color: var(--accent, var(--blue));
+  }
+  .flow-text { font-size: 13.5px; color: var(--text-dim); line-height: 1.55; padding-top: 2px; }
+  .flow-text b { color: var(--text); }
+
+  .bar-wrap { margin-top: 14px; }
+  .bar-track { height: 10px; background: var(--navy-soft); border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+  .bar-fill { height: 100%; border-radius: 6px; }
+  .bar-labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-dim); font-weight: 600; }
+
+  .footer-note {
+    text-align: center; color: var(--text-dim); font-size: 12px; margin-top: 28px; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="dot"></span><span>TASKEARN</span></div>
+  <h1>Team Rank Program</h1>
+  <p class="sub">Grow your team, earn every week. Here's exactly what it takes to become a Team Leader, Supervisor, or Manager — and what you earn once you are one.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="leader">Team Leader</div>
+    <div class="tab" data-tab="supervisor">Supervisor</div>
+    <div class="tab" data-tab="manager">Manager</div>
+  </div>
+
+  <!-- TEAM LEADER -->
+  <div class="panel active" id="leader" style="--accent:#4F8CFF">
+    <div class="hero" style="--accent:#4F8CFF">
+      <div class="rank-icon">🎖️</div>
+      <p class="rank-name">Team Leader</p>
+      <p class="rank-tag">Entry rank for active team builders</p>
+    </div>
+
+    <div class="section-title">HOW YOU QUALIFY</div>
+    <div class="req-card">
+      <div class="req-row"><div class="req-num">12</div><div class="req-text">active <b>direct</b> team members in your own downline</div></div>
+      <div class="req-row"><div class="req-num">5</div><div class="req-text">of those 12 must have each brought in <b>2 of their own</b> active referrals</div></div>
+    </div>
+
+    <div class="section-title">WHAT YOU EARN</div>
+    <div class="reward-grid">
+      <div class="reward-box"><div class="label">Per active joining</div><div class="value accent">$1.00</div></div>
+      <div class="reward-box"><div class="label">Counts across</div><div class="value">Whole team</div></div>
+    </div>
+
+    <div class="section-title">HOW THE WEEKLY TARGET WORKS</div>
+    <div class="flow">
+      <div class="flow-row"><div class="flow-dot">1</div><div class="flow-text">Every <b>Monday</b>, your target resets based on your <b>current active team size</b>.</div></div>
+      <div class="flow-row"><div class="flow-dot">2</div><div class="flow-text">Your target = <b>21% of your active team</b>. Example: 100 active members → target of 21 new active joinings.</div></div>
+      <div class="flow-row"><div class="flow-dot">3</div><div class="flow-text">Bring in the joinings before <b>Sunday 9 PM</b> — from your direct team or anyone below them.</div></div>
+      <div class="flow-row"><div class="flow-dot">4</div><div class="flow-text">Reward pays out automatically the following Monday.</div></div>
+    </div>
+
+    <div class="section-title">REWARD SCALE</div>
+    <div class="req-card">
+      <div class="bar-wrap">
+        <div class="bar-track"><div class="bar-fill" style="width:100%; background: linear-gradient(90deg,#3FCF8E,#4F8CFF);"></div></div>
+        <div class="bar-labels"><span>0%</span><span>50%</span><span>100%+</span></div>
+      </div>
+      <div style="margin-top:14px; font-size:13.5px; color: var(--text-dim); line-height:1.7;">
+        <b style="color:#3FCF8E;">100%+ of target</b> → full reward ($1 × every joining)<br>
+        <b style="color:#F0B94D;">50%–99%</b> → half reward<br>
+        <b style="color:#8CA0C4;">Below 50%</b> → no reward this week, new target issued next Monday
+      </div>
+    </div>
+  </div>
+
+  <!-- SUPERVISOR -->
+  <div class="panel" id="supervisor" style="--accent:#F0B94D">
+    <div class="hero" style="--accent:#F0B94D">
+      <div class="rank-icon">🏅</div>
+      <p class="rank-name">Team Supervisor</p>
+      <p class="rank-tag">For teams building deeper structure</p>
+    </div>
+
+    <div class="section-title">HOW YOU QUALIFY</div>
+    <div class="req-card">
+      <div class="req-row"><div class="req-num">25</div><div class="req-text">active <b>direct</b> team members in your own downline</div></div>
+      <div class="req-row"><div class="req-num">10</div><div class="req-text">of those 25 must have each brought in <b>3 of their own</b> active referrals</div></div>
+    </div>
+
+    <div class="section-title">WHAT YOU EARN</div>
+    <div class="reward-grid">
+      <div class="reward-box"><div class="label">Per active joining</div><div class="value accent">$2.00</div></div>
+      <div class="reward-box"><div class="label">Counts across</div><div class="value">Whole team</div></div>
+    </div>
+
+    <div class="section-title">HOW THE WEEKLY TARGET WORKS</div>
+    <div class="flow">
+      <div class="flow-row"><div class="flow-dot">1</div><div class="flow-text">Every <b>Monday</b>, your target resets based on your <b>current active team size</b>.</div></div>
+      <div class="flow-row"><div class="flow-dot">2</div><div class="flow-text">Your target = <b>21% of your active team</b>. Example: 300 active members → target of 63 new active joinings.</div></div>
+      <div class="flow-row"><div class="flow-dot">3</div><div class="flow-text">Bring in the joinings before <b>Sunday 9 PM</b> — from your direct team or anyone below them.</div></div>
+      <div class="flow-row"><div class="flow-dot">4</div><div class="flow-text">Reward pays out automatically the following Monday.</div></div>
+    </div>
+
+    <div class="section-title">REWARD SCALE</div>
+    <div class="req-card">
+      <div class="bar-wrap">
+        <div class="bar-track"><div class="bar-fill" style="width:100%; background: linear-gradient(90deg,#3FCF8E,#F0B94D);"></div></div>
+        <div class="bar-labels"><span>0%</span><span>50%</span><span>100%+</span></div>
+      </div>
+      <div style="margin-top:14px; font-size:13.5px; color: var(--text-dim); line-height:1.7;">
+        <b style="color:#3FCF8E;">100%+ of target</b> → full reward ($2 × every joining)<br>
+        <b style="color:#F0B94D;">50%–99%</b> → half reward<br>
+        <b style="color:#8CA0C4;">Below 50%</b> → no reward this week, new target issued next Monday
+      </div>
+    </div>
+  </div>
+
+  <!-- MANAGER -->
+  <div class="panel" id="manager" style="--accent:#3FCF8E">
+    <div class="hero" style="--accent:#3FCF8E">
+      <div class="rank-icon">👑</div>
+      <p class="rank-name">Team Manager</p>
+      <p class="rank-tag">Top rank for large, deep networks</p>
+    </div>
+
+    <div class="section-title">HOW YOU QUALIFY</div>
+    <div class="req-card">
+      <div class="req-row"><div class="req-num">50</div><div class="req-text">active <b>direct</b> team members in your own downline</div></div>
+      <div class="req-row"><div class="req-num">25</div><div class="req-text">of those 50 must have each brought in <b>5 of their own</b> active referrals</div></div>
+    </div>
+
+    <div class="section-title">WHAT YOU EARN</div>
+    <div class="reward-grid">
+      <div class="reward-box"><div class="label">Per active joining</div><div class="value accent">$3.00</div></div>
+      <div class="reward-box"><div class="label">Counts across</div><div class="value">Whole team</div></div>
+    </div>
+
+    <div class="section-title">HOW THE WEEKLY TARGET WORKS</div>
+    <div class="flow">
+      <div class="flow-row"><div class="flow-dot">1</div><div class="flow-text">Every <b>Monday</b>, your target resets based on your <b>current active team size</b>.</div></div>
+      <div class="flow-row"><div class="flow-dot">2</div><div class="flow-text">Your target = <b>21% of your active team</b>. Example: 700 active members → target of 147 new active joinings.</div></div>
+      <div class="flow-row"><div class="flow-dot">3</div><div class="flow-text">Bring in the joinings before <b>Sunday 9 PM</b> — from your direct team or anyone below them.</div></div>
+      <div class="flow-row"><div class="flow-dot">4</div><div class="flow-text">Reward pays out automatically the following Monday.</div></div>
+    </div>
+
+    <div class="section-title">REWARD SCALE</div>
+    <div class="req-card">
+      <div class="bar-wrap">
+        <div class="bar-track"><div class="bar-fill" style="width:100%; background: linear-gradient(90deg,#4F8CFF,#3FCF8E);"></div></div>
+        <div class="bar-labels"><span>0%</span><span>50%</span><span>100%+</span></div>
+      </div>
+      <div style="margin-top:14px; font-size:13.5px; color: var(--text-dim); line-height:1.7;">
+        <b style="color:#3FCF8E;">100%+ of target</b> → full reward ($3 × every joining)<br>
+        <b style="color:#F0B94D;">50%–99%</b> → half reward<br>
+        <b style="color:#8CA0C4;">Below 50%</b> → no reward this week, new target issued next Monday
+      </div>
+    </div>
+  </div>
+
+  <p class="footer-note">Ranks are earned automatically once requirements are met — no application needed.<br>Once earned, a rank is never lost. Rewards and weekly targets are sent to your Notifications every Monday.</p>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.panel');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(tab.dataset.tab).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

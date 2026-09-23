@@ -1896,8 +1896,9 @@ exports.requestWithdrawal = onCall(async (request) => {
       }
 
       const currentTotalBalance = Number(userData.totalBalance || userData.balance || 0);
+      const currentVipCapitalForLock = (typeof userData.vipCapital === "number") ? userData.vipCapital : currentTotalBalance;
 
-      const vipLockedCapital = calculateVipLockedCapital(currentTotalBalance);
+      const vipLockedCapital = calculateVipLockedCapital(currentVipCapitalForLock);
       const withdrawableBalance = Math.max(0, currentTotalBalance - vipLockedCapital);
 
       if (amount > withdrawableBalance) {
