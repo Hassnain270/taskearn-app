@@ -861,7 +861,8 @@ exports.adminGetUserDetail = onCall(async (request) => {
     .sort((a, b) => (b.date || 0) - (a.date || 0));
 
   const currentBalance = Number(userData.totalBalance || userData.balance || 0);
-  const activeTier = getVipTierByBalance(currentBalance);
+  const currentVipCapital = (typeof userData.vipCapital === "number") ? userData.vipCapital : currentBalance;
+  const activeTier = getVipTierByBalance(currentVipCapital);
 
   const registeredAtMs = getMemberTimestamp(userData.createdAt);
 
