@@ -30,6 +30,13 @@
       "expo-font",
       "expo-asset",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#3B82F6"
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/icon.png",
