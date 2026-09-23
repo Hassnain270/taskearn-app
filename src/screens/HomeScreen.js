@@ -161,6 +161,7 @@ export default function HomeScreen({ navigation, route }) {
   const [userUid, setUserUid] = useState("");
   const [loading, setLoading] = useState(true);
   const [totalBalance, setTotalBalance] = useState(0.00);
+  const [vipCapitalForDisplay, setVipCapitalForDisplay] = useState(0.00);
   const [todayIncome, setTodayIncome] = useState(0.00);
   const [lastTaskReset, setLastTaskReset] = useState(null);
   const [totalEarnings, setTotalEarnings] = useState(0.00);
@@ -205,7 +206,7 @@ export default function HomeScreen({ navigation, route }) {
     return "No VIP";
   };
 
-  const vipLevel = getLiveVipLevel(totalBalance);
+  const vipLevel = getLiveVipLevel(vipCapitalForDisplay);
 
   // Same 4 PM UTC (9 PM PKT) daily boundary used everywhere else (Tasks
   // screen, backend). The server only actually resets todayEarnings the
@@ -318,6 +319,7 @@ export default function HomeScreen({ navigation, route }) {
       setUserUid(passedUser.uid || "");
       setUsername(passedUser.username || "User");
       setTotalBalance(Number(passedUser.balance || 0));
+      setVipCapitalForDisplay(Number((typeof passedUser.vipCapital === "number" ? passedUser.vipCapital : passedUser.balance) || 0));
       setTodayIncome(Number(passedUser.todayEarnings || 0));
       setTotalEarnings(Number(passedUser.totalEarnings || 0));
       setTotalWithdraw(Number(passedUser.totalWithdraw || 0));
@@ -342,6 +344,7 @@ export default function HomeScreen({ navigation, route }) {
           const data = docSnap.data();
           setUsername(data.username || "User");
           setTotalBalance(Number(data.balance || 0));
+          setVipCapitalForDisplay(Number((typeof data.vipCapital === "number" ? data.vipCapital : data.balance) || 0));
           setTodayIncome(Number(data.todayEarnings || 0));
           setTotalEarnings(Number(data.totalEarnings || 0));
           setTotalWithdraw(Number(data.totalWithdraw || 0));

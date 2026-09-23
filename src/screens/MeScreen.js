@@ -21,6 +21,7 @@ export default function MeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
 
   const [balance, setBalance] = useState(0.0);
+  const [vipCapitalForDisplay, setVipCapitalForDisplay] = useState(0.0);
   const [todayEarnings, setTodayEarnings] = useState(0.0);
   const [taskCount, setTaskCount] = useState(0);
   const [recentActivities, setRecentActivities] = useState([]);
@@ -41,6 +42,8 @@ export default function MeScreen({ navigation }) {
           if (data.username || data.name) setUsername(data.username || data.name);
           if (data.totalBalance !== undefined) setBalance(Number(data.totalBalance));
           else if (data.balance !== undefined) setBalance(Number(data.balance));
+          const vc = typeof data.vipCapital === "number" ? data.vipCapital : (data.totalBalance !== undefined ? data.totalBalance : data.balance);
+          setVipCapitalForDisplay(Number(vc || 0));
 
           if (data.todayIncome !== undefined) setTodayEarnings(Number(data.todayIncome));
           else if (data.todayEarnings !== undefined) setTodayEarnings(Number(data.todayEarnings));
@@ -74,7 +77,7 @@ export default function MeScreen({ navigation }) {
     return "No VIP";
   };
 
-  const vipLevel = getLiveVipLevel(balance);
+  const vipLevel = getLiveVipLevel(vipCapitalForDisplay);
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
   const safeNavigate = (targetScreen, params = {}) => {
