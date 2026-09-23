@@ -2455,12 +2455,40 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       const directBonus = Number((referralCapitalDifference * rates.directReferralRate).toFixed(2));
       const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
       const level1CurrentVipCapital = (typeof level1Data.vipCapital === "number") ? level1Data.vipCapital : (level1Data.balance || 0);
-      const level1NewVipCapital = Number((level1CurrentVipCapital + directBonus).toFixed(2));
+      let level1NewVipCapital = Number((level1CurrentVipCapital + directBonus).toFixed(2));
+      let level1FinalBalance = level1NewBalance;
+
+      const level1PreviousVipId = Number(level1Data.lastClaimedVipLevel || 0);
+      const level1NewTier = getVipTierByBalance(level1NewVipCapital);
+      let level1NewClaimedVipId = level1PreviousVipId;
+      if (level1NewTier && level1NewTier.id > level1PreviousVipId && level1PreviousVipId > 0) {
+        const level1PrevTier = VIP_TIERS.find((t) => t.id === level1PreviousVipId);
+        const level1PrevCapital = level1PrevTier ? level1PrevTier.minCapital : 0;
+        const level1CapitalDiff = level1NewTier.minCapital - level1PrevCapital;
+        if (level1CapitalDiff > 0) {
+          const level1UpgradeBonus = Number((level1CapitalDiff * rates.vipUpgradeRate).toFixed(2));
+          level1NewVipCapital = Number((level1NewVipCapital + level1UpgradeBonus).toFixed(2));
+          level1FinalBalance = Number((level1FinalBalance + level1UpgradeBonus).toFixed(2));
+
+          const level1UpgradeTxRef = db.collection("transactions").doc();
+          transaction.set(level1UpgradeTxRef, {
+            transactionId: level1UpgradeTxRef.id,
+            userId: userData.referredByUid,
+            type: "VIP_UPGRADE_BONUS",
+            amount: level1UpgradeBonus,
+            status: "approved",
+            title: `VIP ${level1NewTier.id} Upgrade Bonus (${formatPercent(rates.vipUpgradeRate)}%)`,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        level1NewClaimedVipId = level1NewTier.id;
+      }
 
       transaction.update(level1Ref, {
-        balance: level1NewBalance,
-        totalBalance: level1NewBalance,
+        balance: level1FinalBalance,
+        totalBalance: level1FinalBalance,
         vipCapital: level1NewVipCapital,
+        lastClaimedVipLevel: level1NewClaimedVipId,
         totalEarnings: admin.firestore.FieldValue.increment(directBonus),
         teamReward: admin.firestore.FieldValue.increment(directBonus),
       });
@@ -2483,12 +2511,40 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
       const indirectBonus = Number((referralCapitalDifference * rates.indirectReferralRate).toFixed(2));
       const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
       const level2CurrentVipCapital = (typeof level2Data.vipCapital === "number") ? level2Data.vipCapital : (level2Data.balance || 0);
-      const level2NewVipCapital = Number((level2CurrentVipCapital + indirectBonus).toFixed(2));
+      let level2NewVipCapital = Number((level2CurrentVipCapital + indirectBonus).toFixed(2));
+      let level2FinalBalance = level2NewBalance;
+
+      const level2PreviousVipId = Number(level2Data.lastClaimedVipLevel || 0);
+      const level2NewTier = getVipTierByBalance(level2NewVipCapital);
+      let level2NewClaimedVipId = level2PreviousVipId;
+      if (level2NewTier && level2NewTier.id > level2PreviousVipId && level2PreviousVipId > 0) {
+        const level2PrevTier = VIP_TIERS.find((t) => t.id === level2PreviousVipId);
+        const level2PrevCapital = level2PrevTier ? level2PrevTier.minCapital : 0;
+        const level2CapitalDiff = level2NewTier.minCapital - level2PrevCapital;
+        if (level2CapitalDiff > 0) {
+          const level2UpgradeBonus = Number((level2CapitalDiff * rates.vipUpgradeRate).toFixed(2));
+          level2NewVipCapital = Number((level2NewVipCapital + level2UpgradeBonus).toFixed(2));
+          level2FinalBalance = Number((level2FinalBalance + level2UpgradeBonus).toFixed(2));
+
+          const level2UpgradeTxRef = db.collection("transactions").doc();
+          transaction.set(level2UpgradeTxRef, {
+            transactionId: level2UpgradeTxRef.id,
+            userId: level1Data.referredByUid,
+            type: "VIP_UPGRADE_BONUS",
+            amount: level2UpgradeBonus,
+            status: "approved",
+            title: `VIP ${level2NewTier.id} Upgrade Bonus (${formatPercent(rates.vipUpgradeRate)}%)`,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        level2NewClaimedVipId = level2NewTier.id;
+      }
 
       transaction.update(level2Ref, {
-        balance: level2NewBalance,
-        totalBalance: level2NewBalance,
+        balance: level2FinalBalance,
+        totalBalance: level2FinalBalance,
         vipCapital: level2NewVipCapital,
+        lastClaimedVipLevel: level2NewClaimedVipId,
         totalEarnings: admin.firestore.FieldValue.increment(indirectBonus),
         teamReward: admin.firestore.FieldValue.increment(indirectBonus),
       });
