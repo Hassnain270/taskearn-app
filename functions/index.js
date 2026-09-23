@@ -2454,10 +2454,13 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     if (level1Doc && level1Doc.exists && isBalanceActive(level1Data)) {
       const directBonus = Number((referralCapitalDifference * rates.directReferralRate).toFixed(2));
       const level1NewBalance = Number(((level1Data.balance || 0) + directBonus).toFixed(2));
+      const level1CurrentVipCapital = (typeof level1Data.vipCapital === "number") ? level1Data.vipCapital : (level1Data.balance || 0);
+      const level1NewVipCapital = Number((level1CurrentVipCapital + directBonus).toFixed(2));
 
       transaction.update(level1Ref, {
         balance: level1NewBalance,
         totalBalance: level1NewBalance,
+        vipCapital: level1NewVipCapital,
         totalEarnings: admin.firestore.FieldValue.increment(directBonus),
         teamReward: admin.firestore.FieldValue.increment(directBonus),
       });
@@ -2479,10 +2482,13 @@ async function creditVerifiedDeposit(db, depositDocRef, userId, amount, txHash) 
     if (level2Doc && level2Doc.exists && isBalanceActive(level2Data)) {
       const indirectBonus = Number((referralCapitalDifference * rates.indirectReferralRate).toFixed(2));
       const level2NewBalance = Number(((level2Data.balance || 0) + indirectBonus).toFixed(2));
+      const level2CurrentVipCapital = (typeof level2Data.vipCapital === "number") ? level2Data.vipCapital : (level2Data.balance || 0);
+      const level2NewVipCapital = Number((level2CurrentVipCapital + indirectBonus).toFixed(2));
 
       transaction.update(level2Ref, {
         balance: level2NewBalance,
         totalBalance: level2NewBalance,
+        vipCapital: level2NewVipCapital,
         totalEarnings: admin.firestore.FieldValue.increment(indirectBonus),
         teamReward: admin.firestore.FieldValue.increment(indirectBonus),
       });
