@@ -279,7 +279,7 @@ export default function HomeScreen({ navigation, route }) {
         }
         if (finalStatus !== 'granted') return;
 
-        const tokenResponse = await Notifications.getExpoPushTokenAsync();
+        const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId: '61760305-2fe3-493d-8f3b-721c4731ca80' });
         const expoPushToken = tokenResponse.data;
 
         if (Platform.OS === 'android') {
