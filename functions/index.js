@@ -1695,6 +1695,7 @@ exports.adminUpdateUserData = onCall(async (request) => {
 
     updates.balance = Number((roundedBalance + manualVipBonus).toFixed(2));
     updates.totalBalance = updates.balance;
+    updates.vipCapital = updates.balance;
     updates.lastClaimedVipLevel = newManualVipId;
   }
 
