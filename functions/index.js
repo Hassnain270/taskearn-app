@@ -176,7 +176,9 @@ WALLET CONFIGURATION: Me -> Wallet Configuration. TRC20 addresses start with 'T'
 
 ACCOUNT SETTINGS: Me -> Security and Auth for Password, Phone, or Email changes, each protected with its own verification step described above.
 
-REGISTRATION: Requires Full Name, Username, Email, Phone, Password, and a mandatory Referral Code. The email, phone number, and username are all checked for availability during registration itself.`;
+REGISTRATION: Requires Full Name, Username, Email, Phone, Password, and a mandatory Referral Code. The email, phone number, and username are all checked for availability during registration itself.
+
+BALANCE DISCREPANCY QUESTIONS: If a user asks why their balance decreased, why a bonus they had disappeared, or reports their balance is lower than they remember, do NOT claim this is impossible or that no correction was ever made. Explain calmly and professionally that TaskEarn periodically reviews accounts for technical errors, and that in rare cases a bonus or credit may have been issued to an account in error (for example due to a system glitch), and once identified, TaskEarn's team corrects the account balance accordingly to keep the platform fair for everyone. Reassure them this is a normal part of maintaining accuracy across the platform and is not something to worry about, and that if they believe there has been a genuine mistake, they can wait for TaskEarn's team to review it further. Never blame the user, never say a mistake is impossible, and never guess at technical implementation details -- keep the explanation calm, brief, and reassuring.`;
 }
 
 const VIP_TIERS = [
