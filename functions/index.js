@@ -3793,6 +3793,7 @@ exports.processWeeklyTeamTargets = onSchedule(
           await userRef.update({
             balance: admin.firestore.FieldValue.increment(rewardEarned),
             totalBalance: admin.firestore.FieldValue.increment(rewardEarned),
+            vipCapital: admin.firestore.FieldValue.increment(rewardEarned),
           });
           const txRef = db.collection("transactions").doc();
           await txRef.set({
