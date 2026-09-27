@@ -1908,10 +1908,12 @@ exports.requestWithdrawal = onCall(async (request) => {
       }
 
       const newTotalBalance = Number((currentTotalBalance - amount).toFixed(2));
+      const newVipCapitalAfterWithdrawal = Number((currentVipCapitalForLock - amount).toFixed(2));
 
       transaction.update(userRef, {
         totalBalance: newTotalBalance,
         balance: newTotalBalance,
+        vipCapital: newVipCapitalAfterWithdrawal,
       });
 
       const newWithdrawalRef = withdrawalsRef.doc();
