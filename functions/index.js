@@ -1395,6 +1395,44 @@ exports.adminGetUsersByStatus = onCall(async (request) => {
   return { success: true, users: results };
 });
 
+// READ-ONLY DIAGNOSTIC: finds every user whose vipCapital exceeds
+// their actual balance (mathematically impossible if the system is
+// consistent -- vipCapital is always meant to be a subset of
+// balance). Changes NOTHING. Used to find everyone affected by the
+// old withdrawal bug before running any real fix.
+exports.adminFindVipCapitalMismatches = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+
+  const usersSnap = await db.collection("users").get();
+  const mismatches = [];
+
+  usersSnap.forEach((d) => {
+    const u = d.data();
+    if (u.isAdmin === true) return;
+    const balance = Number(u.balance || u.totalBalance || 0);
+    const vipCapital = (typeof u.vipCapital === "number") ? u.vipCapital : balance;
+    if (vipCapital > balance + 0.01) {
+      mismatches.push({
+        uid: d.id,
+        username: u.username || d.id,
+        balance: balance,
+        vipCapital: vipCapital,
+        difference: Number((vipCapital - balance).toFixed(2)),
+        lastClaimedVipLevel: u.lastClaimedVipLevel || 0,
+      });
+    }
+  });
+
+  mismatches.sort((a, b) => b.difference - a.difference);
+
+  return { success: true, count: mismatches.length, mismatches: mismatches };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
