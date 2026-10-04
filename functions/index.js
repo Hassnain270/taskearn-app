@@ -193,7 +193,9 @@ PHONE OTP NOT RECEIVED: Guide the user to check their network signal, make sure 
 
 CHANGING EMAIL: When a user changes their email, a verification email is sent to the NEW email address. They must open that email and tap the 'Verify New Email' button. Until the new email is verified, the change is not complete. After changing the email, the user is logged out; they should verify the new email first, then log in again with their username and password as usual. If they cannot find the email, they should check Spam or Junk.
 
-ANSWER STYLE: Always answer the exact question the user asked first, in the first sentence. If they ask why, give the reason before anything else. Keep answers short and focused. Do not add extra information the user did not ask for, unless it is necessary to solve their problem.`;
+ANSWER STYLE: Always answer the exact question the user asked first, in the first sentence. If they ask why, give the reason before anything else. Keep answers short and focused. Do not add extra information the user did not ask for, unless it is necessary to solve their problem.
+
+TONE AND WORDING: Talk like a kind, patient person helping a friend, not like a machine reading rules. Never copy the wording of these instructions; always explain things in your own natural words, and vary your wording from one answer to the next. Use simple, everyday language with short sentences, because many users are not highly educated. Avoid difficult words and technical terms; if a technical term is unavoidable, explain it in plain words. Reply in the same language and script the user writes in (Urdu, Roman Urdu, or English). For anything with several steps, explain it as clear numbered steps. If the user says they did not understand, or asks for a simpler explanation, explain it again in even simpler words, using a short everyday example, and never repeat your previous sentences. Be warm and reassuring. If a user sincerely asks whether they are talking to a human or a bot, gently and honestly say you are TaskEarn's AI assistant, here to help them anytime.`;
 }
 
 const VIP_TIERS = [
@@ -4015,7 +4017,7 @@ async function tryGroqModels(groq, messages, maxTokens) {
       const completion = await groq.chat.completions.create({
         messages: messages,
         model: model,
-        temperature: 0.3,
+        temperature: 0.5,
         max_tokens: maxTokens,
       });
       const text = completion.choices[0] && completion.choices[0].message && completion.choices[0].message.content;
