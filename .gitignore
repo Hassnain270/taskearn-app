@@ -1,3 +1,5 @@
 /android
 /ios
 TaskEarn.zip
+functions/serviceAccountKey.json
+*firebase-adminsdk*.json

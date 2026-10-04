@@ -2128,10 +2128,13 @@ exports.updateWithdrawalStatus = onCall(
             const refundAmount = Number(withdrawalData.amount || 0);
             const currentBalance = Number(userData.balance || userData.totalBalance || 0);
             const refundedBalance = Number((currentBalance + refundAmount).toFixed(2));
+            const currentVipCapitalForRefund = (typeof userData.vipCapital === "number") ? userData.vipCapital : currentBalance;
+            const refundedVipCapital = Number((currentVipCapitalForRefund + refundAmount).toFixed(2));
 
             transaction.update(userRef, {
               balance: refundedBalance,
               totalBalance: refundedBalance,
+              vipCapital: refundedVipCapital,
             });
           }
 
