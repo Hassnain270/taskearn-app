@@ -601,6 +601,13 @@ exports.updateWalletAddress = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "Wallet address and network are required.");
   }
 
+  if (isTrc20Address(walletAddress) || String(network).toUpperCase().indexOf("TRC") !== -1) {
+    throw new HttpsError("invalid-argument", "TRC20 wallet addresses are no longer accepted. Please add a BEP20 (BNB Smart Chain) USDT address starting with 0x.");
+  }
+  if (!isBep20Address(walletAddress)) {
+    throw new HttpsError("invalid-argument", "Please enter a valid BEP20 wallet address. It starts with 0x and is 42 characters long.");
+  }
+
   const db = admin.firestore();
 
   try {
@@ -626,6 +633,70 @@ exports.updateWalletAddress = onCall(async (request) => {
     console.error("Error in updateWalletAddress:", error);
     throw new HttpsError("internal", "Failed to update wallet address.");
   }
+});
+
+function isTrc20Address(addr) {
+  return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(String(addr || "").trim());
+}
+
+function isBep20Address(addr) {
+  return /^0x[a-fA-F0-9]{40}$/.test(String(addr || "").trim());
+}
+
+function compareAppVersions(a, b) {
+  const pa = String(a || "0").split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || "0").split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+async function getAppVersionConfigInternal(db) {
+  try {
+    const snap = await db.collection("config").doc("appVersion").get();
+    if (snap.exists) {
+      const d = snap.data();
+      return { latestVersion: d.latestVersion || "1.0.0", minVersion: d.minVersion || "1.0.0", apkUrl: d.apkUrl || "" };
+    }
+  } catch (e) {
+    console.error("Error reading app version config:", e);
+  }
+  return { latestVersion: "1.0.0", minVersion: "1.0.0", apkUrl: "" };
+}
+
+// Public: the app checks this on start to decide whether a mandatory update is required.
+exports.getAppVersionConfig = onCall(async () => {
+  const db = admin.firestore();
+  return await getAppVersionConfigInternal(db);
+});
+
+exports.adminUpdateAppVersionConfig = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may change app version settings.");
+  }
+  const data = request.data || {};
+  const versionPattern = /^\d+\.\d+\.\d+$/;
+  const updates = {};
+  if (data.latestVersion !== undefined) {
+    if (!versionPattern.test(String(data.latestVersion))) throw new HttpsError("invalid-argument", "Latest version must look like 1.2.0");
+    updates.latestVersion = String(data.latestVersion);
+  }
+  if (data.minVersion !== undefined) {
+    if (!versionPattern.test(String(data.minVersion))) throw new HttpsError("invalid-argument", "Minimum version must look like 1.2.0");
+    updates.minVersion = String(data.minVersion);
+  }
+  if (data.apkUrl !== undefined) updates.apkUrl = String(data.apkUrl).trim();
+  if (Object.keys(updates).length === 0) throw new HttpsError("invalid-argument", "Nothing to update.");
+  updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+  await db.collection("config").doc("appVersion").set(updates, { merge: true });
+  return { success: true, config: await getAppVersionConfigInternal(db) };
 });
 
 exports.calculateTeamStats = onCall(async (request) => {
@@ -1861,6 +1932,10 @@ exports.requestWithdrawalOtp = onCall(
       );
     }
 
+    if (isTrc20Address(userData.walletAddress)) {
+      throw new HttpsError("failed-precondition", "TRC20 wallet addresses are no longer supported for withdrawals. Please go to Me, then Wallet Configuration, add a BEP20 (BNB Smart Chain) USDT address starting with 0x, and try again.");
+    }
+
     const targetEmail = userData.email;
     if (!targetEmail) throw new HttpsError("invalid-argument", "No email address is on file for this account.");
 
@@ -1942,7 +2017,11 @@ exports.requestWithdrawal = onCall(async (request) => {
         );
       }
 
-      const effectiveTaskCount = getEffectiveTaskCount(userData);
+      if (isTrc20Address(userData.walletAddress)) {
+      throw new HttpsError("failed-precondition", "TRC20 wallet addresses are no longer supported for withdrawals. Please go to Me, then Wallet Configuration, add a BEP20 (BNB Smart Chain) USDT address starting with 0x, and try again.");
+    }
+
+    const effectiveTaskCount = getEffectiveTaskCount(userData);
       if (effectiveTaskCount < 5) {
         throw new HttpsError(
           "failed-precondition",
@@ -3988,7 +4067,52 @@ exports.chatWithSupportAI = onCall(
       // No promotion notifications found or fetch failed -- treat as no active promotion.
     }
 
-    const systemPrompt = buildSystemPrompt(rates, activePromotion);
+    let systemPrompt = buildSystemPrompt(rates, activePromotion);
+
+    try {
+      const appVersion = (request.data && typeof request.data.appVersion === "string") ? request.data.appVersion : null;
+      const versionConfig = await getAppVersionConfigInternal(db);
+      let versionText;
+      if (!appVersion) {
+        versionText = "The user's app version is unknown, which means they are using an older version of the app. If their issue could be caused by an outdated app, advise them to download and install the latest version (" + versionConfig.latestVersion + ").";
+      } else if (compareAppVersions(appVersion, versionConfig.latestVersion) < 0) {
+        versionText = "The user is using app version " + appVersion + ", which is older than the latest version " + versionConfig.latestVersion + ". If relevant, advise them to update the app first.";
+      } else {
+        versionText = "The user is using the latest app version (" + appVersion + ").";
+      }
+      systemPrompt += "\n\nAPP VERSION: " + versionText + " If the user asks which app version they have, tell them this.";
+    } catch (e) {
+      console.error("AI version context failed:", e);
+    }
+
+    try {
+      const uid = request.auth.uid;
+      const cutoffMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const results = await Promise.all([
+        db.collection("notifications").orderBy("createdAt", "desc").limit(40).get(),
+        db.collection("notifications").where("targetUid", "==", uid).limit(20).get(),
+        db.collection("announcements").orderBy("createdAt", "desc").limit(8).get(),
+      ]);
+      const seen = {};
+      const lines = [];
+      const addDoc = (d, label) => {
+        if (seen[d.id]) return;
+        const x = d.data();
+        const ms = x.createdAt && typeof x.createdAt.toMillis === "function" ? x.createdAt.toMillis() : 0;
+        if (!ms || ms < cutoffMs) return;
+        seen[d.id] = true;
+        lines.push({ ms: ms, text: "[" + label + ", " + new Date(ms).toISOString().slice(0, 10) + "] " + String(x.title || "").slice(0, 120) + ": " + String(x.message || "").slice(0, 600) });
+      };
+      results[0].forEach((d) => { const x = d.data(); if (!x.targetUid) addDoc(d, "Notification to all users"); });
+      results[1].forEach((d) => addDoc(d, "Personal notification to this user"));
+      results[2].forEach((d) => addDoc(d, "Announcement"));
+      lines.sort((m, n) => n.ms - m.ms);
+      if (lines.length > 0) {
+        systemPrompt += "\n\nRECENT MESSAGES FROM TASKEARN (newest first). Use these to understand recent changes and to explain them when the user asks about a notification or announcement. When a message describes a policy change, you may briefly say what the previous rule was and clearly explain the current rule. Only explain current rules and never guess about future changes. If an older instruction in this prompt conflicts with a newer message below, follow the newer message.\n" + lines.slice(0, 15).map((l) => l.text).join("\n");
+      }
+    } catch (e) {
+      console.error("AI recent messages context failed:", e);
+    }
 
     const groq = new Groq({ apiKey: apiKey });
 
