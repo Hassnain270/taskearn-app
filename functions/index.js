@@ -1950,7 +1950,9 @@ exports.requestWithdrawal = onCall(async (request) => {
       }
 
       const newTotalBalance = Number((currentTotalBalance - amount).toFixed(2));
-      const newVipCapitalAfterWithdrawal = Number((currentVipCapitalForLock - amount).toFixed(2));
+      const excessAboveVipCapital = Math.max(0, currentTotalBalance - currentVipCapitalForLock);
+      const vipCapitalDeducted = Number(Math.max(0, amount - excessAboveVipCapital).toFixed(2));
+      const newVipCapitalAfterWithdrawal = Number((currentVipCapitalForLock - vipCapitalDeducted).toFixed(2));
 
       transaction.update(userRef, {
         totalBalance: newTotalBalance,
@@ -1961,6 +1963,7 @@ exports.requestWithdrawal = onCall(async (request) => {
       const newWithdrawalRef = withdrawalsRef.doc();
       transaction.set(newWithdrawalRef, {
         withdrawalId: newWithdrawalRef.id,
+        vipCapitalDeducted: vipCapitalDeducted,
         userId: userId,
         username: userData.username || userData.email || "User",
         amount: Number(amount),
@@ -2129,7 +2132,8 @@ exports.updateWithdrawalStatus = onCall(
             const currentBalance = Number(userData.balance || userData.totalBalance || 0);
             const refundedBalance = Number((currentBalance + refundAmount).toFixed(2));
             const currentVipCapitalForRefund = (typeof userData.vipCapital === "number") ? userData.vipCapital : currentBalance;
-            const refundedVipCapital = Number((currentVipCapitalForRefund + refundAmount).toFixed(2));
+            const vipCapitalToRestore = (typeof withdrawalData.vipCapitalDeducted === "number") ? withdrawalData.vipCapitalDeducted : refundAmount;
+            const refundedVipCapital = Number((currentVipCapitalForRefund + vipCapitalToRestore).toFixed(2));
 
             transaction.update(userRef, {
               balance: refundedBalance,
