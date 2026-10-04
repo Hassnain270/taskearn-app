@@ -420,7 +420,7 @@ export default function SecurityScreen({ navigation }) {
   // on the same screen. The fix: navigate to Login FIRST, unconditionally,
   // then show the confirmation message. Navigation no longer depends on
   // the alert being shown or dismissed correctly on any platform.
-  const forceReLogin = (message) => {
+  const forceReLogin = (message, title) => {
     if (navigation?.reset) {
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } else if (navigation?.replace) {
@@ -433,7 +433,7 @@ export default function SecurityScreen({ navigation }) {
     if (Platform.OS === 'web') {
       window.alert(message);
     } else {
-      Alert.alert("Security Update Complete", message);
+      Alert.alert(title || "Security Update Complete", message);
     }
   };
 
@@ -662,7 +662,8 @@ export default function SecurityScreen({ navigation }) {
       setCurrentEmail(cleanEmail);
       closeModal();
       forceReLogin(
-        `A confirmation link has been sent to ${cleanEmail}. Please check that inbox and click the link to activate your new email, then log in again using your new email.`
+        `A verification email has been sent to ${cleanEmail}. Please open it and tap the "Verify New Email" button. Once your new email is verified, you can log in to your account again. If you can't find it, please check your Spam or Junk folder.`,
+        "Verify Your New Email"
       );
     } catch (err) {
       if (err.code === 'functions/already-exists' || err.message?.includes('already linked to another account')) {
@@ -689,7 +690,8 @@ export default function SecurityScreen({ navigation }) {
       setCurrentEmail(cleanEmail);
       closeModal();
       forceReLogin(
-        `A confirmation link has been sent to ${cleanEmail}. Please check that inbox and click the link to activate your new email, then log in again using your new email.`
+        `A verification email has been sent to ${cleanEmail}. Please open it and tap the "Verify New Email" button. Once your new email is verified, you can log in to your account again. If you can't find it, please check your Spam or Junk folder.`,
+        "Verify Your New Email"
       );
     }
   };

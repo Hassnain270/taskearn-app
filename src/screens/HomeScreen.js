@@ -12,7 +12,8 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
-  Image
+  Image,
+  Modal
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets  } from 'react-native-safe-area-context';
@@ -23,6 +24,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const functionsInstance = getFunctions();
 
@@ -155,6 +157,22 @@ const formatPercent = (rate) => {
 
 export default function HomeScreen({ navigation, route }) {
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+  const [noticeQueue, setNoticeQueue] = useState([]);
+
+  // Marks the popup currently on screen as understood, so it never shows again on this device.
+  const acknowledgeNotice = async () => {
+    const current = noticeQueue[0];
+    if (!current) return;
+    setNoticeQueue((q) => q.slice(1));
+    try {
+      const raw = await AsyncStorage.getItem('ackNoticeKeys');
+      const list = raw ? JSON.parse(raw) : [];
+      if (list.indexOf(current.key) === -1) list.push(current.key);
+      await AsyncStorage.setItem('ackNoticeKeys', JSON.stringify(list.slice(-100)));
+    } catch (e) {
+      // Storage failure only means the popup may show again next time.
+    }
+  };
   const { isDarkMode, toggleTheme } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
   const [username, setUsername] = useState("Loading...");
@@ -308,6 +326,43 @@ export default function HomeScreen({ navigation, route }) {
       }
     };
     loadUnreadCount();
+
+    const loadNoticePopups = async () => {
+      try {
+        const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+        const nowMs = Date.now();
+        let ackList = [];
+        try {
+          const raw = await AsyncStorage.getItem('ackNoticeKeys');
+          ackList = raw ? JSON.parse(raw) : [];
+        } catch (e) {
+          ackList = [];
+        }
+        const items = [];
+        try {
+          const getMyNotifications = httpsCallable(functionsInstance, 'getMyNotifications');
+          const nRes = await getMyNotifications();
+          ((nRes.data && nRes.data.notifications) || []).forEach((n) => {
+            items.push({ key: 'n_' + n.id, title: n.title || 'Notification', message: n.message || '', createdAt: Number(n.createdAt) || 0, isAnnouncement: false });
+          });
+        } catch (e) {}
+        try {
+          const getAnnouncements = httpsCallable(functionsInstance, 'getAnnouncements');
+          const aRes = await getAnnouncements();
+          ((aRes.data && aRes.data.announcements) || []).forEach((a) => {
+            items.push({ key: 'a_' + a.id, title: a.title || 'Announcement', message: a.message || '', createdAt: Number(a.createdAt) || 0, isAnnouncement: true });
+          });
+        } catch (e) {}
+        const pending = items
+          .filter((it) => it.createdAt && (nowMs - it.createdAt) <= THREE_DAYS && ackList.indexOf(it.key) === -1)
+          .sort((x, y) => y.createdAt - x.createdAt)
+          .slice(0, 5);
+        setNoticeQueue(pending);
+      } catch (err) {
+        // Non-critical: popups simply won't show this time.
+      }
+    };
+    loadNoticePopups();
 
   }, []);
 
@@ -605,6 +660,25 @@ export default function HomeScreen({ navigation, route }) {
         ))}
       </View>
 
+    <Modal visible={noticeQueue.length > 0} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.noticeOverlay}>
+          <View style={[styles.noticeBox, { backgroundColor: isDarkMode ? '#161B22' : '#FFFFFF' }]}>
+            <View style={styles.noticeIconCircle}>
+              <MaterialCommunityIcons name={noticeQueue[0] && noticeQueue[0].isAnnouncement ? 'bullhorn-outline' : 'bell-ring-outline'} size={28} color="#3B82F6" />
+            </View>
+            <Text style={[styles.noticeTitle, { color: isDarkMode ? '#FFFFFF' : '#1E293B' }]}>{noticeQueue[0] ? noticeQueue[0].title : ''}</Text>
+            <ScrollView style={styles.noticeScroll}>
+              <Text style={[styles.noticeMessage, { color: isDarkMode ? '#C9D1D9' : '#475569' }]}>{noticeQueue[0] ? noticeQueue[0].message : ''}</Text>
+            </ScrollView>
+            {noticeQueue.length > 1 && (
+              <Text style={styles.noticeCounter}>{'1 of ' + noticeQueue.length}</Text>
+            )}
+            <TouchableOpacity style={styles.noticeBtn} onPress={acknowledgeNotice}>
+              <Text style={styles.noticeBtnText}>I Understand</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -702,6 +776,15 @@ const styles = StyleSheet.create({
   statsValue: { fontSize: 16, fontWeight: 'bold' },
   tickerHeader: { borderRightWidth: 1, borderRightColor: '#E2E8F0', paddingRight: 8, marginRight: 8 },
   tickerBox: { flex: 1, height: 24, overflow: 'hidden' },
+  noticeOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  noticeBox: { width: '100%', maxWidth: 380, maxHeight: '80%', borderRadius: 22, padding: 22, alignItems: 'center' },
+  noticeIconCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(59,130,246,0.12)', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  noticeTitle: { fontSize: 17, fontWeight: '800', textAlign: 'center', marginBottom: 10 },
+  noticeScroll: { alignSelf: 'stretch', maxHeight: 320 },
+  noticeMessage: { fontSize: 14, lineHeight: 21 },
+  noticeCounter: { fontSize: 11, color: '#94A3B8', marginTop: 10 },
+  noticeBtn: { backgroundColor: '#3B82F6', alignSelf: 'stretch', height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginTop: 16 },
+  noticeBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   menuItem: { width: '33.33%', alignItems: 'center', paddingVertical: 12 },
   tabItem: { alignItems: 'center' },
   tabText: { fontSize: 9, fontWeight: '700', color: '#94A3B8', marginTop: 3 },

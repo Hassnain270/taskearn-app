@@ -26,7 +26,7 @@ export default function SettlementConfigScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
 
-  const [network, setNetwork] = useState('TRC20');
+  const [network, setNetwork] = useState('BEP20');
   const [walletAddress, setWalletAddress] = useState('');
   const [isWalletSaved, setIsWalletSaved] = useState(false);
   const [isEditable, setIsEditable] = useState(true);
@@ -54,7 +54,7 @@ export default function SettlementConfigScreen({ navigation }) {
             const data = userDoc.data();
             if (data.walletAddress) {
               setWalletAddress(data.walletAddress);
-              setNetwork(data.walletNetwork || 'TRC20');
+              setNetwork('BEP20');
               setIsWalletSaved(true);
               setIsEditable(false);
               setInitialLoading(false);
@@ -67,7 +67,7 @@ export default function SettlementConfigScreen({ navigation }) {
       }
 
       setWalletAddress('');
-      setNetwork('TRC20');
+      setNetwork('BEP20');
       setIsWalletSaved(false);
       setIsEditable(true);
       setInitialLoading(false);
@@ -311,22 +311,7 @@ export default function SettlementConfigScreen({ navigation }) {
           <View style={styles.inputGroup}>
             <Text style={currentStyles.inputLabel}>SELECT BLOCKCHAIN NETWORK</Text>
             <View style={styles.networkSelectorRow}>
-              <TouchableOpacity
-                style={[
-                  currentStyles.networkButton,
-                  network === 'TRC20' && currentStyles.activeNetworkButton,
-                  !isEditable && styles.disabledSelector
-                ]}
-                disabled={!isEditable}
-                onPress={() => {
-                  setNetwork('TRC20');
-                  setWalletAddress('');
-                }}
-              >
-                <Text style={[currentStyles.networkButtonText, network === 'TRC20' && currentStyles.activeNetworkText]}>
-                  USDT - TRC20
-                </Text>
-              </TouchableOpacity>
+              
 
               <TouchableOpacity
                 style={[
@@ -372,7 +357,7 @@ export default function SettlementConfigScreen({ navigation }) {
             <Text style={currentStyles.termsText}>
               {network === 'TRC20'
                 ? "TRC20 addresses must start with 'T' and be exactly 34 characters long. Do not enter BEP20 or ERC20 addresses here. Transactions sent to incorrect networks are permanently irrecoverable."
-                : "BEP20 (BNB Smart Chain) addresses must start with '0x' and be exactly 42 characters long. Ensure your receiving platform explicitly supports USDT via BSC (BEP20)."
+                : "TRC20 addresses are no longer accepted for withdrawals. BEP20 (BNB Smart Chain) addresses must start with '0x' and be exactly 42 characters long. Ensure your receiving platform explicitly supports USDT via BSC (BEP20)."
               }
             </Text>
           </View>
