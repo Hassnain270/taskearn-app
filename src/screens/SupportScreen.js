@@ -1,3 +1,4 @@
+import * as Application from 'expo-application';
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import {
   View,
@@ -57,7 +58,7 @@ export default function LiveSupportScreen({ navigation }) {
 
     try {
       const chatFn = httpsCallable(functions, 'chatWithSupportAI');
-      const result = await chatFn({ message: trimmed, history: historyForBackend });
+      const result = await chatFn({ message: trimmed, history: historyForBackend, appVersion: Application.nativeApplicationVersion || null });
       const replyText = result?.data?.reply || "Sorry, I couldn't process that. Please try again.";
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'model', text: replyText }]);
     } catch (error) {

@@ -164,6 +164,42 @@ export default function AdminBonusConfigScreen({ navigation }) {
   const [weeklyTargetPercent, setWeeklyTargetPercent] = useState('21');
   const [originalWeeklyTargetPercent, setOriginalWeeklyTargetPercent] = useState('21');
 
+  const [appLatestVersion, setAppLatestVersion] = useState('');
+  const [appMinVersion, setAppMinVersion] = useState('');
+  const [appApkUrl, setAppApkUrl] = useState('');
+  const [savingVersion, setSavingVersion] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const fn = httpsCallable(functions, 'getAppVersionConfig');
+        const res = await fn();
+        const cfg = res.data || {};
+        setAppLatestVersion(cfg.latestVersion || '');
+        setAppMinVersion(cfg.minVersion || '');
+        setAppApkUrl(cfg.apkUrl || '');
+      } catch (e) {}
+    })();
+  }, []);
+
+  const handleSaveVersion = async () => {
+    const pattern = /^\d+\.\d+\.\d+$/;
+    if (!pattern.test(appLatestVersion.trim()) || !pattern.test(appMinVersion.trim())) {
+      showAlert('Invalid Version', 'Both versions must look like 1.1.0');
+      return;
+    }
+    setSavingVersion(true);
+    try {
+      const fn = httpsCallable(functions, 'adminUpdateAppVersionConfig');
+      await fn({ latestVersion: appLatestVersion.trim(), minVersion: appMinVersion.trim(), apkUrl: appApkUrl.trim() });
+      showAlert('Saved', 'App version settings updated.');
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to save version settings.');
+    } finally {
+      setSavingVersion(false);
+    }
+  };
+
   const handleSave = async () => {
     const updates = {};
     let validationError = null;
@@ -335,6 +371,41 @@ export default function AdminBonusConfigScreen({ navigation }) {
                 />
               </View>
             </View>
+
+            <View style={currentStyles.infoBox}>
+              <View style={styles.infoHeaderRow}>
+                <MaterialCommunityIcons name="cellphone-arrow-down" size={18} color="#3B82F6" />
+                <Text style={currentStyles.infoTitle}>App Version</Text>
+              </View>
+              <Text style={currentStyles.infoDescription}>
+                Users whose installed app is older than the Minimum Required Version will see a full-screen Update Now screen. Raise it only after the new APK has been uploaded.
+              </Text>
+            </View>
+
+            <View style={currentStyles.fieldCard}>
+              <Text style={currentStyles.fieldLabel}>Latest Version</Text>
+              <View style={currentStyles.inputRow}>
+                <TextInput style={currentStyles.percentInput} value={appLatestVersion} onChangeText={setAppLatestVersion} placeholder="1.1.0" placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"} autoCapitalize="none" />
+              </View>
+            </View>
+
+            <View style={currentStyles.fieldCard}>
+              <Text style={currentStyles.fieldLabel}>Minimum Required Version</Text>
+              <View style={currentStyles.inputRow}>
+                <TextInput style={currentStyles.percentInput} value={appMinVersion} onChangeText={setAppMinVersion} placeholder="1.1.0" placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"} autoCapitalize="none" />
+              </View>
+            </View>
+
+            <View style={currentStyles.fieldCard}>
+              <Text style={currentStyles.fieldLabel}>APK Download Link (optional)</Text>
+              <View style={currentStyles.inputRow}>
+                <TextInput style={currentStyles.percentInput} value={appApkUrl} onChangeText={setAppApkUrl} placeholder="Leave empty to use the default link" placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"} autoCapitalize="none" />
+              </View>
+            </View>
+
+            <TouchableOpacity style={[styles.saveButton, { marginBottom: 20 }]} onPress={handleSaveVersion} disabled={savingVersion}>
+              {savingVersion ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Save Version Settings</Text>}
+            </TouchableOpacity>
 
             {lastUpdatedInfo && (
               <Text style={styles.lastUpdatedText}>

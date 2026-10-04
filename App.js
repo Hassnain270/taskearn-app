@@ -13,6 +13,7 @@ import * as Notifications from 'expo-notifications';
 import { auth } from './src/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
 import { ThemeProvider } from './ThemeContext';
+import UpdateGate from './src/components/UpdateGate';
 
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
@@ -228,6 +229,7 @@ export default function App() {
     <ErrorBoundary>
       <SafeAreaProvider>
         <ThemeProvider>
+          <UpdateGate>
           <NavigationContainer linking={linking}>
             <Stack.Navigator
               initialRouteName={initialRouteName}
@@ -279,6 +281,7 @@ export default function App() {
               <Stack.Screen name="AdminUsersByStatusScreen" component={AdminUsersByStatusScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
           </NavigationContainer>
+          </UpdateGate>
         </ThemeProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
