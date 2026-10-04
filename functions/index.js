@@ -4007,7 +4007,7 @@ exports.checkAndPromoteTeamRanks = onSchedule(
 const GROQ_MODEL_CHAIN = [
   "openai/gpt-oss-120b",
   "openai/gpt-oss-20b",
-  "qwen/qwen3-32b",
+  "llama-3.3-70b-versatile",
 ];
 
 async function tryGroqModels(groq, messages, maxTokens) {
@@ -4024,6 +4024,7 @@ async function tryGroqModels(groq, messages, maxTokens) {
       if (text) return text;
     } catch (err) {
       lastError = err;
+      console.error("Groq model failed:", model, err && err.status, err && err.message);
     }
   }
   throw lastError || new Error("All Groq models failed.");
@@ -4041,7 +4042,11 @@ exports.chatWithSupportAI = onCall(
     }
     if (userMessage.length > 1000) throw new HttpsError("invalid-argument", "Message is too long.");
 
-    const history = Array.isArray(request.data && request.data.history) ? request.data.history.slice(-10) : [];
+    const rawHistory = Array.isArray(request.data && request.data.history) ? request.data.history.slice(-10) : [];
+    const history = rawHistory.map((h) => {
+      const text = (h && (h.text || h.content || (Array.isArray(h.parts) && h.parts[0] && h.parts[0].text))) || "";
+      return { role: (h && h.role === "user") ? "user" : "assistant", text: String(text) };
+    }).filter((h) => h.text.trim().length > 0);
 
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new HttpsError("internal", "API Key configuration missing.");
