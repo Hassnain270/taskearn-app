@@ -1529,6 +1529,66 @@ exports.adminFindVipCapitalMismatches = onCall(async (request) => {
   return { success: true, count: mismatches.length, mismatches: mismatches };
 });
 
+// Public: current withdrawal fee rate for the withdraw screen.
+exports.getWithdrawalFeeRate = onCall(async () => {
+  const db = admin.firestore();
+  const r = await getBonusRates(db);
+  return { withdrawalFeeRate: (typeof r.withdrawalFeeRate === "number") ? r.withdrawalFeeRate : 0.07 };
+});
+
+// Users who have withdrawn as much as or more than they deposited, split by whether they have any team.
+exports.adminGetOverWithdrawnUsers = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+  const results = await Promise.all([
+    db.collection("users").get(),
+    db.collection("transactions").where("type", "==", "DEPOSIT").where("status", "==", "approved").get(),
+    db.collection("withdrawals").where("status", "==", "completed").get(),
+  ]);
+  const usersSnap = results[0];
+  const dep = {};
+  const wd = {};
+  const direct = {};
+  const activeDirect = {};
+  results[1].forEach((d) => { const x = d.data(); dep[x.userId] = (dep[x.userId] || 0) + Number(x.amount || 0); });
+  results[2].forEach((d) => { const x = d.data(); wd[x.userId] = (wd[x.userId] || 0) + Number(x.amount || 0); });
+  usersSnap.forEach((d) => {
+    const u = d.data();
+    if (u.referredByUid) {
+      direct[u.referredByUid] = (direct[u.referredByUid] || 0) + 1;
+      if (isBalanceActive(u)) activeDirect[u.referredByUid] = (activeDirect[u.referredByUid] || 0) + 1;
+    }
+  });
+  const noTeam = [];
+  const withTeam = [];
+  usersSnap.forEach((d) => {
+    const u = d.data();
+    if (u.isAdmin === true) return;
+    const w = wd[d.id] || 0;
+    const dp = dep[d.id] || 0;
+    if (w <= 0 || w < dp) return;
+    const row = {
+      uid: d.id,
+      username: u.username || d.id,
+      deposited: Number(dp.toFixed(2)),
+      withdrawn: Number(w.toFixed(2)),
+      extra: Number((w - dp).toFixed(2)),
+      balance: Number(u.balance || u.totalBalance || 0),
+      directCount: direct[d.id] || 0,
+      activeDirectCount: activeDirect[d.id] || 0,
+      lastTaskAt: (u.lastTaskReset && typeof u.lastTaskReset.toMillis === "function") ? u.lastTaskReset.toMillis() : null,
+    };
+    if (row.directCount === 0) noTeam.push(row); else withTeam.push(row);
+  });
+  noTeam.sort((a, b) => b.extra - a.extra);
+  withTeam.sort((a, b) => b.extra - a.extra);
+  return { success: true, noTeam: noTeam, withTeam: withTeam };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
@@ -4204,6 +4264,7 @@ exports.chatWithSupportAI = onCall(
     }
 
     let systemPrompt = buildSystemPrompt(rates, activePromotion);
+    systemPrompt += "\n\nCURRENT WITHDRAWAL FEE: " + String(Number((((typeof rates.withdrawalFeeRate === "number") ? rates.withdrawalFeeRate : 0.07) * 100).toFixed(2))) + " percent of the withdrawal amount. If any other part of these instructions mentions a different withdrawal fee, ignore it and use this one.";
 
     try {
       const appVersion = (request.data && typeof request.data.appVersion === "string") ? request.data.appVersion : null;
