@@ -1,3 +1,5 @@
+import { httpsCallable as fbHttpsCallable } from 'firebase/functions';
+import { functions as fbFunctions } from '../firebaseConfig';
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
   View,
@@ -53,10 +55,10 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   useEffect(() => {
     (async () => {
       try {
-        const fn = httpsCallable(functions, 'getBonusConfig');
+        const fn = fbHttpsCallable(fbFunctions, 'getWithdrawalFeeRate');
         const res = await fn();
-        const r = res.data && res.data.rates;
-        if (r && typeof r.withdrawalFeeRate === 'number') setFeeRate(r.withdrawalFeeRate);
+        const v = res && res.data ? res.data.withdrawalFeeRate : undefined;
+        if (typeof v === 'number') setFeeRate(v);
       } catch (e) {}
     })();
   }, []);

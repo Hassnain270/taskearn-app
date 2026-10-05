@@ -120,6 +120,12 @@ export default function AdminPanelScreen({ navigation }) {
       icon: 'award',
       target: 'AdminTeamRanksScreen',
     },
+    {
+      title: 'Withdrawal Watch',
+      subtitle: 'Users who have withdrawn as much as or more than they deposited',
+      icon: 'alert-triangle',
+      target: 'AdminWithdrawalWatchScreen',
+    },
   ];
 
   return (

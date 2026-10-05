@@ -45,6 +45,7 @@ import NotificationsScreen from './src/screens/NotificationsScreen';
 import AdminSendNotificationScreen from './src/screens/AdminSendNotificationScreen';
 import AdminTeamRanksScreen from './src/screens/AdminTeamRanksScreen';
 import AdminUsersByStatusScreen from './src/screens/AdminUsersByStatusScreen';
+import AdminWithdrawalWatchScreen from './src/screens/AdminWithdrawalWatchScreen';
 
 // Ensures a notification banner/sound appears even while the app is open
 // in the foreground (Expo's default is to suppress this unless a handler
@@ -279,6 +280,7 @@ export default function App() {
               <Stack.Screen name="AdminSendNotificationScreen" component={AdminSendNotificationScreen} options={{ headerShown: false }} />
               <Stack.Screen name="AdminTeamRanksScreen" component={AdminTeamRanksScreen} options={{ headerShown: false }} />
               <Stack.Screen name="AdminUsersByStatusScreen" component={AdminUsersByStatusScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="AdminWithdrawalWatchScreen" component={AdminWithdrawalWatchScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
           </NavigationContainer>
           </UpdateGate>
