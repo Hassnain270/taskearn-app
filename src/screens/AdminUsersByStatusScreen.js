@@ -218,7 +218,7 @@ const darkStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  searchSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  searchSection: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
   loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
   emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500', textAlign: 'center', paddingHorizontal: 30 },
   listContainer: { paddingHorizontal: 16, paddingTop: 4 },
