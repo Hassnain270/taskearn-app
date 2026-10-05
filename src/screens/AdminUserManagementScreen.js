@@ -59,6 +59,8 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [editPhone, setEditPhone] = useState('');
   const [editWallet, setEditWallet] = useState('');
   const [editBalance, setEditBalance] = useState('');
+  const [editVipCapital, setEditVipCapital] = useState('');
+  const [savingVipCapital, setSavingVipCapital] = useState(false);
   const [restrictedTasksMode, setRestrictedTasksMode] = useState(false);
   const [balanceReason, setBalanceReason] = useState('');
   const [saving, setSaving] = useState(false);
@@ -138,6 +140,7 @@ export default function AdminUserManagementScreen({ navigation }) {
       setEditPhone(detail.phoneNumber || '');
       setEditWallet(detail.walletAddress || '');
       setEditBalance(String(detail.balance ?? '0'));
+      setEditVipCapital(String(detail.vipCapital ?? detail.balance ?? '0'));
       setRestrictedTasksMode(detail.restrictedTasksMode === true);
     } catch (err) {
       showAlert('Error', err.message || 'Failed to load user details.');
@@ -156,6 +159,27 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [tempPassword, setTempPassword] = useState('');
   const [settingPassword, setSettingPassword] = useState(false);
   const [showTempPassword, setShowTempPassword] = useState(false);
+
+  const handleSaveVipCapital = async () => {
+    if (!selectedDetail) return;
+    const value = parseFloat(editVipCapital);
+    if (isNaN(value) || value < 0) {
+      showAlert('Invalid Value', 'VIP capital must be a valid positive number.');
+      return;
+    }
+    setSavingVipCapital(true);
+    try {
+      const fn = httpsCallable(functions, 'adminSetVipCapital');
+      const res = await fn({ uid: selectedDetail.uid, vipCapital: value });
+      const saved = res && res.data ? res.data.vipCapital : value;
+      setSelectedDetail((prev) => (prev ? { ...prev, vipCapital: saved } : prev));
+      showAlert('Saved', 'VIP capital updated to $' + Number(saved).toFixed(2) + '.');
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to update VIP capital.');
+    } finally {
+      setSavingVipCapital(false);
+    }
+  };
 
   const handleSetPassword = async () => {
     if (!selectedDetail) return;
@@ -499,6 +523,14 @@ export default function AdminUserManagementScreen({ navigation }) {
                           <Text style={currentStyles.infoValue}>{selectedDetail.currentVip}</Text>
                         </View>
                         <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>VIP Capital</Text>
+                          <Text style={currentStyles.infoValue}>${Number(selectedDetail.vipCapital ?? 0).toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <Text style={styles.infoLabel}>Last Task Completed</Text>
+                          <Text style={currentStyles.infoValue}>{selectedDetail.lastTaskAt ? new Date(selectedDetail.lastTaskAt).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
                           <Text style={styles.infoLabel}>Referred By</Text>
                           <Text style={currentStyles.infoValue}>{selectedDetail.referrerUsername || 'None'}</Text>
                         </View>
@@ -584,6 +616,18 @@ export default function AdminUserManagementScreen({ navigation }) {
                         placeholder="0.00"
                         placeholderTextColor={isDarkMode ? "#565D68" : "#94A3B8"}
                       />
+
+                      <Text style={styles.fieldLabel}>VIP Capital</Text>
+                      <Text style={styles.joiningNote}>Use only for manual corrections. It decides the user's VIP level and daily task profit.</Text>
+                      <TextInput
+                        style={[currentStyles.editInput, { marginTop: 8 }]}
+                        value={editVipCapital}
+                        onChangeText={(t) => setEditVipCapital(t.replace(/[^0-9.]/g, ''))}
+                        keyboardType="decimal-pad"
+                      />
+                      <TouchableOpacity style={[styles.saveBtn, { marginTop: 10, marginBottom: 16 }]} onPress={handleSaveVipCapital} disabled={savingVipCapital}>
+                        {savingVipCapital ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save VIP Capital</Text>}
+                      </TouchableOpacity>
 
                       {showReasonField && (
                         <React.Fragment>

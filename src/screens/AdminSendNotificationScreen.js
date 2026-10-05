@@ -64,6 +64,7 @@ export default function AdminSendNotificationScreen({ navigation }) {
   // Update/Promotion), or the Menu's Announcements screen (a simple,
   // durable company-news list with no push and no presets).
   const [destination, setDestination] = useState('notification');
+  const [targetUsernames, setTargetUsernames] = useState('');
 
   const [selectedType, setSelectedType] = useState(null);
   const [title, setTitle] = useState('');
@@ -118,6 +119,15 @@ export default function AdminSendNotificationScreen({ navigation }) {
       return { title: title.trim(), message: message.trim() };
     }
 
+    if (destination === 'users') {
+      const names = targetUsernames.split(/[\s,]+/).map((n) => n.trim()).filter((n) => n.length > 0);
+      if (names.length === 0) {
+        showAlert('Missing Usernames', 'Please enter at least one username.');
+        return null;
+      }
+      return { title: title.trim(), message: message.trim(), usernames: names };
+    }
+
     if (!selectedType) {
       showAlert('Select a Type', 'Please choose a notification type first.');
       return null;
@@ -152,7 +162,7 @@ export default function AdminSendNotificationScreen({ navigation }) {
     const payload = buildPayload();
     if (!payload) return;
 
-    const destinationLabel = destination === 'announcement' ? "the Announcements screen" : "every user's Notifications";
+    const destinationLabel = destination === 'announcement' ? "the Announcements screen" : (destination === 'users' ? ("the selected users (" + (payload.usernames ? payload.usernames.length : 0) + ")") : "every user's Notifications");
     const confirmMessage = 'This will be sent to ' + destinationLabel + ' immediately. Are you sure?';
 
     if (Platform.OS === 'web') {
@@ -175,10 +185,17 @@ export default function AdminSendNotificationScreen({ navigation }) {
   const performSend = async (payload) => {
     setSending(true);
     try {
-      const fnName = destination === 'announcement' ? 'sendAnnouncement' : 'sendAdminNotification';
+      const fnName = destination === 'announcement' ? 'sendAnnouncement' : (destination === 'users' ? 'adminSendTargetedNotification' : 'sendAdminNotification');
       const sendFn = httpsCallable(functions, fnName);
-      await sendFn(payload);
-      showAlert('Sent', destination === 'announcement' ? 'Announcement has been posted.' : 'Notification has been sent to all users.');
+      const sendRes = await sendFn(payload);
+      if (destination === 'users') {
+        const r = (sendRes && sendRes.data) || {};
+        const missing = (r.notFound || []);
+        showAlert('Sent', 'Sent to ' + (r.sentCount || 0) + ' user(s).' + (missing.length ? ('\n\nNot found: ' + missing.join(', ')) : ''));
+        setTargetUsernames('');
+      } else {
+        showAlert('Sent', destination === 'announcement' ? 'Announcement has been posted.' : 'Notification has been sent to all users.');
+      }
       setSelectedType(null);
       setTitle('');
       setMessage('');
@@ -244,6 +261,14 @@ export default function AdminSendNotificationScreen({ navigation }) {
               <Text style={currentStyles.destLabel}>Announcement</Text>
               <Text style={styles.destSubtext}>Menu screen, no push</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[currentStyles.destCard, destination === 'users' && { borderColor: '#10B981', borderWidth: 2 }]}
+              onPress={() => selectDestination('users')}
+            >
+              <Feather name="users" size={20} color="#10B981" />
+              <Text style={currentStyles.destLabel}>Specific Users</Text>
+              <Text style={styles.destSubtext}>Only chosen usernames</Text>
+            </TouchableOpacity>
           </View>
 
           {destination === 'notification' && (
@@ -268,7 +293,7 @@ export default function AdminSendNotificationScreen({ navigation }) {
             </>
           )}
 
-          {(destination === 'announcement' || selectedType) && (
+          {(destination === 'announcement' || destination === 'users' || selectedType) && (
             <>
               <Text style={currentStyles.sectionLabel}>TITLE</Text>
               <TextInput
@@ -321,9 +346,24 @@ export default function AdminSendNotificationScreen({ navigation }) {
                 </>
               )}
 
+              {destination === 'users' && (
+                <>
+                  <Text style={currentStyles.sectionLabel}>USERNAMES</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: isDarkMode ? '#30363D' : '#E2E8F0', borderRadius: 12, padding: 12, minHeight: 80, textAlignVertical: 'top', marginBottom: 14, color: isDarkMode ? '#FFFFFF' : '#1E293B', backgroundColor: isDarkMode ? '#161B22' : '#FFFFFF' }}
+                    value={targetUsernames}
+                    onChangeText={setTargetUsernames}
+                    placeholder="e.g. ali123, sara55, usman7"
+                    placeholderTextColor={isDarkMode ? '#565D68' : '#94A3B8'}
+                    autoCapitalize="none"
+                    multiline
+                  />
+                </>
+              )}
+
               <TouchableOpacity style={styles.sendBtn} onPress={handleSend} disabled={sending}>
                 {sending ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.sendBtnText}>
-                  {destination === 'announcement' ? 'Post Announcement' : 'Send to All Users'}
+                  {destination === 'announcement' ? 'Post Announcement' : (destination === 'users' ? 'Send to Selected Users' : 'Send to All Users')}
                 </Text>}
               </TouchableOpacity>
             </>
