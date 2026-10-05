@@ -68,7 +68,10 @@ export default function NotificationsScreen({ navigation }) {
 
   const formatDate = (ms) => {
     if (!ms) return '';
-    return new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const d = new Date(ms);
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const pad = (n) => (n < 10 ? '0' + n : '' + n);
+    return months[d.getUTCMonth()] + ' ' + d.getUTCDate() + ', ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ' UTC';
   };
 
   const handleDownload = () => {

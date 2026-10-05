@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import {
   View,
   Text,
@@ -65,6 +65,34 @@ export default function AdminSendNotificationScreen({ navigation }) {
   // durable company-news list with no push and no presets).
   const [destination, setDestination] = useState('notification');
   const [targetUsernames, setTargetUsernames] = useState('');
+  const [targetHistory, setTargetHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState('');
+
+  const formatUtc = (ms) => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const pad = (n) => (n < 10 ? '0' + n : '' + n);
+    return months[d.getUTCMonth()] + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear() + ', ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ' UTC';
+  };
+
+  const loadTargetHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const fn = httpsCallable(functions, 'adminGetTargetedNotificationHistory');
+      const res = await fn();
+      setTargetHistory((res.data && res.data.history) || []);
+    } catch (e) {
+      setTargetHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (destination === 'users') loadTargetHistory();
+  }, [destination]);
 
   const [selectedType, setSelectedType] = useState(null);
   const [title, setTitle] = useState('');
@@ -193,6 +221,7 @@ export default function AdminSendNotificationScreen({ navigation }) {
         const missing = (r.notFound || []);
         showAlert('Sent', 'Sent to ' + (r.sentCount || 0) + ' user(s).' + (missing.length ? ('\n\nNot found: ' + missing.join(', ')) : ''));
         setTargetUsernames('');
+        loadTargetHistory();
       } else {
         showAlert('Sent', destination === 'announcement' ? 'Announcement has been posted.' : 'Notification has been sent to all users.');
       }
@@ -369,7 +398,41 @@ export default function AdminSendNotificationScreen({ navigation }) {
             </>
           )}
 
-        </ScrollView>
+        {destination === 'users' && (
+          <View style={{ marginTop: 24 }}>
+            <Text style={currentStyles.sectionLabel}>SENT HISTORY</Text>
+            <TextInput
+              style={{ borderWidth: 1, borderColor: isDarkMode ? '#30363D' : '#E2E8F0', borderRadius: 12, padding: 10, marginBottom: 12, color: isDarkMode ? '#FFFFFF' : '#1E293B', backgroundColor: isDarkMode ? '#161B22' : '#FFFFFF' }}
+              value={historyFilter}
+              onChangeText={setHistoryFilter}
+              placeholder="Search by username"
+              placeholderTextColor={isDarkMode ? '#565D68' : '#94A3B8'}
+              autoCapitalize="none"
+            />
+            {historyLoading ? (
+              <ActivityIndicator color="#10B981" />
+            ) : (() => {
+              const q = historyFilter.trim().toLowerCase();
+              const list = q ? targetHistory.filter((h) => (h.sentTo || []).some((u) => String(u).toLowerCase().indexOf(q) !== -1)) : targetHistory;
+              if (list.length === 0) {
+                return <Text style={{ color: '#94A3B8', fontSize: 13 }}>No history yet.</Text>;
+              }
+              return list.map((h) => (
+                <View key={h.id} style={{ borderWidth: 1, borderColor: isDarkMode ? '#30363D' : '#E2E8F0', borderRadius: 12, padding: 12, marginBottom: 10, backgroundColor: isDarkMode ? '#161B22' : '#FFFFFF' }}>
+                  <Text style={{ fontWeight: '700', fontSize: 14, color: isDarkMode ? '#FFFFFF' : '#1E293B' }}>{h.title}</Text>
+                  <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{formatUtc(h.createdAt)}</Text>
+                  <Text style={{ fontSize: 13, marginTop: 6, color: isDarkMode ? '#C9D1D9' : '#475569' }}>{h.message}</Text>
+                  <Text style={{ fontSize: 12, marginTop: 6, color: '#10B981' }}>{'Sent to: ' + ((h.sentTo || []).join(', ') || '-')}</Text>
+                  {(h.notFound || []).length > 0 && (
+                    <Text style={{ fontSize: 12, marginTop: 2, color: '#EF4444' }}>{'Not found: ' + h.notFound.join(', ')}</Text>
+                  )}
+                </View>
+              ));
+            })()}
+          </View>
+        )}
+
+      </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
