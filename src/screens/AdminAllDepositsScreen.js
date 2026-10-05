@@ -212,7 +212,10 @@ export default function AdminAllDepositsScreen({ navigation }) {
 
   const renderSectionHeader = ({ section }) => (
     <View style={currentStyles.sectionHeaderRow}>
-      <Text style={currentStyles.sectionHeaderText}>{section.title}</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', alignSelf: 'stretch' }}>
+        <Text style={currentStyles.sectionHeaderText}>{section.title + ' (' + section.data.length + ')'}</Text>
+        <Text style={[currentStyles.sectionHeaderText, { color: '#22C55E' }]}>{'$' + section.data.reduce((sum, x) => sum + Number(x.amount || 0), 0).toFixed(2)}</Text>
+      </View>
     </View>
   );
 
