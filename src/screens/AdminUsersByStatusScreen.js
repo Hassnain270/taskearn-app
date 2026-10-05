@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
-  FlatList,
+  SectionList,
   TextInput
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -16,13 +16,32 @@ import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { ThemeContext } from '../../ThemeContext';
 
+// Same app-day boundary used by the deposits and withdrawals screens.
+const DAY_SHIFT_MS = 16 * 60 * 60 * 1000;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function getDayKey(ms) {
+  const d = new Date(ms - DAY_SHIFT_MS);
+  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+}
+
+function getDayLabel(key) {
+  if (!key) return 'Unknown date';
+  if (key === getDayKey(Date.now())) return 'Today';
+  if (key === getDayKey(Date.now() - 24 * 60 * 60 * 1000)) return 'Yesterday';
+  const y = Math.floor(key / 10000);
+  const m = Math.floor((key % 10000) / 100);
+  const d = key % 100;
+  return MONTHS[m - 1] + ' ' + d + ', ' + y;
+}
+
 export default function AdminUsersByStatusScreen({ navigation, route }) {
   const { isDarkMode } = useContext(ThemeContext);
   const insets = useSafeAreaInsets();
   const currentStyles = isDarkMode ? darkStyles : lightStyles;
 
   const status = (route.params && route.params.status) || 'active';
-  const isActive = status === 'active';
+  const title = status === 'all' ? 'All Registered Users' : (status === 'active' ? 'Active Users' : 'Inactive Users');
 
   const [accessChecked, setAccessChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -59,7 +78,22 @@ export default function AdminUsersByStatusScreen({ navigation, route }) {
     return users.filter((u) => (u.username || '').toLowerCase().includes(cleanQuery));
   }, [users, searchQuery]);
 
-  const formatDate = (ms) => {
+  const sections = useMemo(() => {
+    const groups = [];
+    const byKey = {};
+    filteredUsers.forEach((u) => {
+      const key = u.createdAt ? getDayKey(u.createdAt) : 0;
+      if (!byKey[key]) {
+        byKey[key] = { key: String(key), title: getDayLabel(key), data: [] };
+        groups.push(byKey[key]);
+      }
+      byKey[key].data.push(u);
+    });
+    groups.forEach((g) => { g.title = g.title + '  (' + g.data.length + ')'; });
+    return groups;
+  }, [filteredUsers]);
+
+  const formatTime = (ms) => {
     if (!ms) return 'Unknown';
     return new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
@@ -67,13 +101,30 @@ export default function AdminUsersByStatusScreen({ navigation, route }) {
   const renderItem = ({ item }) => (
     <View style={currentStyles.userCard}>
       <View style={styles.cardTopRow}>
-        <Text style={currentStyles.username}>{item.username}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+          <Text style={currentStyles.username} numberOfLines={1}>{item.username}</Text>
+          {status === 'all' && (
+            <View style={[styles.badge, { backgroundColor: item.isActive ? 'rgba(34,197,94,0.15)' : 'rgba(148,163,184,0.18)' }]}>
+              <Text style={[styles.badgeText, { color: item.isActive ? '#22C55E' : '#94A3B8' }]}>{item.isActive ? 'Active' : 'Inactive'}</Text>
+            </View>
+          )}
+        </View>
         <Text style={[styles.depositText, { color: item.totalDeposited > 0 ? '#22C55E' : '#94A3B8' }]}>
           {item.totalDeposited > 0 ? '$' + item.totalDeposited.toFixed(2) : 'No Deposit'}
         </Text>
       </View>
-      <Text style={styles.detailText}>Registered: {formatDate(item.createdAt)}</Text>
+      <Text style={styles.detailText}>Registered: {formatTime(item.createdAt)}</Text>
       <Text style={styles.detailText}>Referred by: {item.referrerUsername || 'None'}</Text>
+    </View>
+  );
+
+  const header = (
+    <View style={currentStyles.header}>
+      <TouchableOpacity style={currentStyles.backButton} onPress={() => navigation.goBack()}>
+        <Feather name="arrow-left" size={18} color={isDarkMode ? "#FFFFFF" : "#1E293B"} />
+      </TouchableOpacity>
+      <Text style={currentStyles.headerTitle}>{title}{accessChecked && isAdmin ? ' (' + users.length + ')' : ''}</Text>
+      <View style={{ width: 36 }} />
     </View>
   );
 
@@ -81,13 +132,7 @@ export default function AdminUsersByStatusScreen({ navigation, route }) {
     return (
       <SafeAreaView style={currentStyles.container} edges={['top']}>
         <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
-        <View style={currentStyles.header}>
-          <TouchableOpacity style={currentStyles.backButton} onPress={() => navigation.goBack()}>
-            <Feather name="arrow-left" size={18} color={isDarkMode ? "#FFFFFF" : "#1E293B"} />
-          </TouchableOpacity>
-          <Text style={currentStyles.headerTitle}>{isActive ? 'Active' : 'Inactive'} Users</Text>
-          <View style={{ width: 36 }} />
-        </View>
+        {header}
         <View style={styles.accessDeniedContainer}>
           <MaterialCommunityIcons name="shield-lock-outline" size={40} color={isDarkMode ? "#334155" : "#CBD5E1"} />
           <Text style={styles.accessDeniedText}>You don't have permission to view this page.</Text>
@@ -99,14 +144,7 @@ export default function AdminUsersByStatusScreen({ navigation, route }) {
   return (
     <SafeAreaView style={currentStyles.container} edges={['top']}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
-
-      <View style={currentStyles.header}>
-        <TouchableOpacity style={currentStyles.backButton} onPress={() => navigation.goBack()}>
-          <Feather name="arrow-left" size={18} color={isDarkMode ? "#FFFFFF" : "#1E293B"} />
-        </TouchableOpacity>
-        <Text style={currentStyles.headerTitle}>{isActive ? 'Active' : 'Inactive'} Users ({users.length})</Text>
-        <View style={{ width: 36 }} />
-      </View>
+      {header}
 
       <View style={styles.searchSection}>
         <View style={currentStyles.searchWrapper}>
@@ -131,7 +169,7 @@ export default function AdminUsersByStatusScreen({ navigation, route }) {
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color="#3B82F6" />
         </View>
-      ) : filteredUsers.length === 0 ? (
+      ) : sections.length === 0 ? (
         <View style={styles.loaderContainer}>
           <MaterialCommunityIcons name="account-search-outline" size={32} color={isDarkMode ? "#334155" : "#CBD5E1"} />
           <Text style={styles.emptyText}>
@@ -139,10 +177,14 @@ export default function AdminUsersByStatusScreen({ navigation, route }) {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={filteredUsers}
+        <SectionList
+          sections={sections}
           keyExtractor={(item) => item.uid}
           renderItem={renderItem}
+          renderSectionHeader={({ section }) => (
+            <Text style={currentStyles.sectionHeader}>{section.title}</Text>
+          )}
+          stickySectionHeadersEnabled={false}
           contentContainerStyle={[styles.listContainer, { paddingBottom: 20 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
         />
@@ -159,7 +201,8 @@ const lightStyles = StyleSheet.create({
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', gap: 8 },
   searchInput: { flex: 1, fontSize: 13, color: '#1E293B' },
   userCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#F1F5F9' },
-  username: { fontSize: 14, fontWeight: '700', color: '#1E293B' }
+  username: { fontSize: 14, fontWeight: '700', color: '#1E293B', flexShrink: 1 },
+  sectionHeader: { fontSize: 12, fontWeight: '800', color: '#64748B', marginTop: 10, marginBottom: 8 }
 });
 
 const darkStyles = StyleSheet.create({
@@ -170,15 +213,18 @@ const darkStyles = StyleSheet.create({
   searchWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#161B22', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#21262D', gap: 8 },
   searchInput: { flex: 1, fontSize: 13, color: '#FFFFFF' },
   userCard: { backgroundColor: '#161B22', borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#21262D' },
-  username: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' }
+  username: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', flexShrink: 1 },
+  sectionHeader: { fontSize: 12, fontWeight: '800', color: '#8B949E', marginTop: 10, marginBottom: 8 }
 });
 
 const styles = StyleSheet.create({
   searchSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
   loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
   emptyText: { color: '#94A3B8', fontSize: 12, fontWeight: '500', textAlign: 'center', paddingHorizontal: 30 },
-  listContainer: { paddingHorizontal: 16, paddingTop: 8 },
-  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  listContainer: { paddingHorizontal: 16, paddingTop: 4 },
+  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  badge: { marginLeft: 8, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  badgeText: { fontSize: 10, fontWeight: '800' },
   depositText: { fontSize: 12, fontWeight: '700' },
   detailText: { fontSize: 11, color: '#94A3B8', fontWeight: '500', marginTop: 4 },
   accessDeniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 40 },

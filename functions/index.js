@@ -1449,6 +1449,7 @@ exports.adminGetUsersByStatus = onCall(async (request) => {
 
   const filtered = allUsers.filter((u) => {
     if (u.isAdmin === true) return false;
+    if (status === "all") return true;
     return status === "active" ? isBalanceActive(u) : !isBalanceActive(u);
   });
 
@@ -1478,6 +1479,7 @@ exports.adminGetUsersByStatus = onCall(async (request) => {
       username: u.username || u.id,
       createdAt: getMemberTimestamp(u.createdAt),
       totalDeposited: Number(depositTotalsByUid[u.id] || 0),
+      isActive: isBalanceActive(u),
       referrerUsername: referrerUsername,
     };
   });
