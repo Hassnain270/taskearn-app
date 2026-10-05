@@ -973,6 +973,8 @@ exports.adminGetUserDetail = onCall(async (request) => {
       totalWithdraw: Number(userData.totalWithdraw || 0),
       teamReward: Number(userData.teamReward || 0),
       currentVip: activeTier ? activeTier.name : "No VIP",
+      vipCapital: currentVipCapital,
+      lastTaskAt: (userData.lastTaskReset && typeof userData.lastTaskReset.toMillis === "function") ? userData.lastTaskReset.toMillis() : null,
       directTeamCount: directTeamCount,
       indirectTeamSize: indirectTeamSize,
       totalTeamSize: totalTeamSize,
@@ -1708,6 +1710,59 @@ exports.adminSetUserPassword = onCall(async (request) => {
   }
 
   return { success: true };
+});
+
+// Sends a personal notification to specific users by username.
+exports.adminSendTargetedNotification = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may send notifications.");
+  }
+  const data = request.data || {};
+  const title = String(data.title || "").trim();
+  const message = String(data.message || "").trim();
+  const rawNames = Array.isArray(data.usernames) ? data.usernames : [];
+  const usernames = [];
+  rawNames.forEach((n) => {
+    const clean = String(n || "").trim();
+    if (clean && usernames.indexOf(clean) === -1) usernames.push(clean);
+  });
+  if (!title || !message) throw new HttpsError("invalid-argument", "Title and message are required.");
+  if (title.length > 120 || message.length > 2000) throw new HttpsError("invalid-argument", "Title or message is too long.");
+  if (usernames.length === 0) throw new HttpsError("invalid-argument", "Please enter at least one username.");
+  if (usernames.length > 50) throw new HttpsError("invalid-argument", "You can send to at most 50 users at a time.");
+
+  const sent = [];
+  const notFound = [];
+  for (const name of usernames) {
+    let snap = await db.collection("users").where("username", "==", name).limit(1).get();
+    if (snap.empty && name !== name.toLowerCase()) {
+      snap = await db.collection("users").where("username", "==", name.toLowerCase()).limit(1).get();
+    }
+    if (snap.empty) { notFound.push(name); continue; }
+    await createPersonalNotification(db, snap.docs[0].id, title, message, "custom");
+    sent.push(name);
+  }
+  return { success: true, sentCount: sent.length, notFound: notFound };
+});
+
+// Lets an admin set a user's vipCapital directly (for manual corrections).
+exports.adminSetVipCapital = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may change VIP capital.");
+  }
+  const data = request.data || {};
+  const uid = data.uid;
+  const value = Number(data.vipCapital);
+  if (!uid) throw new HttpsError("invalid-argument", "A user UID is required.");
+  if (!isFinite(value) || value < 0) throw new HttpsError("invalid-argument", "VIP capital must be a valid positive number.");
+  await db.collection("users").doc(uid).update({ vipCapital: Number(value.toFixed(2)) });
+  return { success: true, vipCapital: Number(value.toFixed(2)) };
 });
 
 exports.adminUpdateUserData = onCall(async (request) => {
