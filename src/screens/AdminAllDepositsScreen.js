@@ -123,6 +123,27 @@ export default function AdminAllDepositsScreen({ navigation }) {
 
   const viewTotal = useMemo(() => monthDeposits.reduce((sum, x) => sum + Number(x.amount || 0), 0), [monthDeposits]);
 
+  const [showBreakdown, setShowBreakdown] = useState(false);
+
+  const vipBreakdown = useMemo(() => {
+    const firstTime = {};
+    deposits.forEach((d) => {
+      if (!d.date) return;
+      if (!firstTime[d.uid] || d.date < firstTime[d.uid]) firstTime[d.uid] = d.date;
+    });
+    const tiers = [70, 150, 300, 500, 1000, 1500, 3000, 5000, 10000, 20000];
+    const rows = tiers.map((t, i) => ({ label: 'VIP ' + (i + 1), min: t, newCount: 0, topUpCount: 0 }));
+    const below = { label: 'Below $70', min: 0, newCount: 0, topUpCount: 0 };
+    monthDeposits.forEach((d) => {
+      const amt = Number(d.amount || 0) + 0.5;
+      let idx = -1;
+      for (let i = tiers.length - 1; i >= 0; i--) { if (amt >= tiers[i]) { idx = i; break; } }
+      const row = idx === -1 ? below : rows[idx];
+      if (firstTime[d.uid] === d.date) row.newCount++; else row.topUpCount++;
+    });
+    return rows.concat([below]);
+  }, [deposits, monthDeposits]);
+
   const filteredDeposits = useMemo(() => {
     const cleanQuery = searchQuery.trim().toLowerCase();
     if (!cleanQuery) return monthDeposits;
@@ -253,6 +274,29 @@ export default function AdminAllDepositsScreen({ navigation }) {
             <Feather name="chevron-right" size={22} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
           </TouchableOpacity>
         </View>
+      </View>
+
+      <View style={currentStyles.summaryCard}>
+        <TouchableOpacity onPress={() => setShowBreakdown(!showBreakdown)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.summaryLabel}>Deposits by VIP level</Text>
+          <Feather name={showBreakdown ? 'chevron-up' : 'chevron-down'} size={18} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
+        </TouchableOpacity>
+        {showBreakdown && (
+          <View style={{ marginTop: 10 }}>
+            <View style={{ flexDirection: 'row', paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: isDarkMode ? '#30363D' : '#E2E8F0' }}>
+              <Text style={{ flex: 1, fontSize: 11, fontWeight: '700', color: '#94A3B8' }}>Level</Text>
+              <Text style={{ width: 64, textAlign: 'center', fontSize: 11, fontWeight: '700', color: '#94A3B8' }}>New</Text>
+              <Text style={{ width: 64, textAlign: 'center', fontSize: 11, fontWeight: '700', color: '#94A3B8' }}>Top-up</Text>
+            </View>
+            {vipBreakdown.map((r) => (
+              <View key={r.label} style={{ flexDirection: 'row', paddingVertical: 5 }}>
+                <Text style={{ flex: 1, fontSize: 13, color: isDarkMode ? '#FFFFFF' : '#1E293B' }}>{r.label + (r.min ? '  ($' + (r.min >= 1000 ? (r.min / 1000) + 'K' : r.min) + ')' : '')}</Text>
+                <Text style={{ width: 64, textAlign: 'center', fontSize: 13, fontWeight: '700', color: r.newCount ? '#22C55E' : '#94A3B8' }}>{r.newCount}</Text>
+                <Text style={{ width: 64, textAlign: 'center', fontSize: 13, fontWeight: '700', color: r.topUpCount ? '#3B82F6' : '#94A3B8' }}>{r.topUpCount}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
 
       <View style={styles.searchSection}>
