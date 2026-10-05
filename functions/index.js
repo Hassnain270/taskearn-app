@@ -1754,10 +1754,41 @@ exports.adminSendTargetedNotification = onCall(async (request) => {
     sentBy: request.auth.uid,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+  await db.collection("targetedNotificationLog").add({
+    title: title,
+    message: message,
+    sentTo: sent,
+    notFound: notFound,
+    sentCount: sent.length,
+    sentBy: request.auth.uid,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
   return { success: true, sentCount: sent.length, notFound: notFound };
 });
 
 // Lets an admin set a user's vipCapital directly (for manual corrections).
+exports.adminGetTargetedNotificationHistory = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const db = admin.firestore();
+  const adminDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!adminDoc.exists || adminDoc.data().isAdmin !== true) {
+    throw new HttpsError("permission-denied", "Only administrators may view this.");
+  }
+  const snap = await db.collection("targetedNotificationLog").orderBy("createdAt", "desc").limit(100).get();
+  const history = snap.docs.map((d) => {
+    const x = d.data();
+    return {
+      id: d.id,
+      title: x.title || "",
+      message: x.message || "",
+      sentTo: x.sentTo || [],
+      notFound: x.notFound || [],
+      createdAt: (x.createdAt && typeof x.createdAt.toMillis === "function") ? x.createdAt.toMillis() : 0,
+    };
+  });
+  return { success: true, history: history };
+});
+
 exports.adminGetTargetedNotificationHistory = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
