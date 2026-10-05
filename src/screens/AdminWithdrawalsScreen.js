@@ -221,7 +221,7 @@ export default function AdminWithdrawalsScreen({ navigation }) {
               <Text style={currentStyles.detailValue}>${Number(item.amount || 0).toFixed(2)}</Text>
             </View>
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Fee (7%)</Text>
+              <Text style={styles.detailLabel}>Fee</Text>
               <Text style={styles.feeText}>-${Number(item.fee || 0).toFixed(2)}</Text>
             </View>
             <View style={styles.detailRow}>

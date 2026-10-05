@@ -17,7 +17,7 @@ import { ThemeContext } from '../../ThemeContext';
 const TYPE_LABELS = {
   DEPOSIT: 'Deposit',
   WITHDRAWAL: 'Withdrawal',
-  WELCOME_BONUS: 'Welcome Bonus (7%)',
+  WELCOME_BONUS: 'Welcome Bonus',
   DIRECT_REFERRAL_BONUS: 'Direct Bonus (10%)',
   INDIRECT_REFERRAL_BONUS: 'Indirect Bonus (5%)',
   VIP_UPGRADE_BONUS: 'VIP Upgrade Bonus (5%)',
