@@ -75,6 +75,17 @@ export default function AdminAllDepositsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [deposits, setDeposits] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewKey, setViewKey] = useState(getMonthKey(Date.now()));
+  const shiftViewMonth = (delta) => {
+    setViewKey((k) => {
+      let y = Math.floor(k / 100);
+      let m = (k % 100) + delta;
+      if (m < 0) { m = 11; y -= 1; }
+      if (m > 11) { m = 0; y += 1; }
+      const next = y * 100 + m;
+      return next > getMonthKey(Date.now()) ? k : next;
+    });
+  };
 
   useEffect(() => {
     const checkAccessAndLoad = async () => {
@@ -106,11 +117,17 @@ export default function AdminAllDepositsScreen({ navigation }) {
     checkAccessAndLoad();
   }, []);
 
+  const monthDeposits = useMemo(() => {
+    return deposits.filter((x) => x.date && getMonthKey(x.date) === viewKey);
+  }, [deposits, viewKey]);
+
+  const viewTotal = useMemo(() => monthDeposits.reduce((sum, x) => sum + Number(x.amount || 0), 0), [monthDeposits]);
+
   const filteredDeposits = useMemo(() => {
     const cleanQuery = searchQuery.trim().toLowerCase();
-    if (!cleanQuery) return deposits;
-    return deposits.filter((d) => (d.username || '').toLowerCase().includes(cleanQuery));
-  }, [deposits, searchQuery]);
+    if (!cleanQuery) return monthDeposits;
+    return monthDeposits.filter((d) => (d.username || '').toLowerCase().includes(cleanQuery));
+  }, [monthDeposits, searchQuery]);
 
   const monthlySummary = useMemo(() => {
     const currentMonthKey = getMonthKey(Date.now());
@@ -222,6 +239,22 @@ export default function AdminAllDepositsScreen({ navigation }) {
         </View>
       </View>
 
+      <View style={currentStyles.summaryCard}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <TouchableOpacity onPress={() => shiftViewMonth(-1)} style={{ padding: 8 }}>
+            <Feather name="chevron-left" size={22} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
+          </TouchableOpacity>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={styles.summaryLabel}>{getMonthLabel(viewKey)}</Text>
+            <Text style={[styles.summaryValue, { color: '#22C55E' }]}>${viewTotal.toFixed(2)}</Text>
+            <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{monthDeposits.length + ' deposits'}</Text>
+          </View>
+          <TouchableOpacity onPress={() => shiftViewMonth(1)} style={{ padding: 8 }}>
+            <Feather name="chevron-right" size={22} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.searchSection}>
         <View style={currentStyles.searchWrapper}>
           <Feather name="search" size={16} color={isDarkMode ? "#8B949E" : "#94A3B8"} />
@@ -249,7 +282,7 @@ export default function AdminAllDepositsScreen({ navigation }) {
         <View style={styles.loaderContainer}>
           <MaterialCommunityIcons name="cash-remove" size={32} color={isDarkMode ? "#334155" : "#CBD5E1"} />
           <Text style={styles.emptyText}>
-            {searchQuery ? 'No deposits found for that username.' : 'No deposits recorded yet.'}
+            {searchQuery ? 'No deposits found for that username.' : 'No deposits in this month.'}
           </Text>
         </View>
       ) : (

@@ -68,6 +68,17 @@ export default function AdminAllWithdrawalsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [withdrawals, setWithdrawals] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewKey, setViewKey] = useState(getMonthKey(Date.now()));
+  const shiftViewMonth = (delta) => {
+    setViewKey((k) => {
+      let y = Math.floor(k / 100);
+      let m = (k % 100) + delta;
+      if (m < 0) { m = 11; y -= 1; }
+      if (m > 11) { m = 0; y += 1; }
+      const next = y * 100 + m;
+      return next > getMonthKey(Date.now()) ? k : next;
+    });
+  };
 
   useEffect(() => {
     const checkAccessAndLoad = async () => {
@@ -99,11 +110,17 @@ export default function AdminAllWithdrawalsScreen({ navigation }) {
     checkAccessAndLoad();
   }, []);
 
+  const monthWithdrawals = useMemo(() => {
+    return withdrawals.filter((x) => x.date && getMonthKey(x.date) === viewKey);
+  }, [withdrawals, viewKey]);
+
+  const viewTotal = useMemo(() => monthWithdrawals.reduce((sum, x) => sum + Number(x.amount || 0), 0), [monthWithdrawals]);
+
   const filteredWithdrawals = useMemo(() => {
     const cleanQuery = searchQuery.trim().toLowerCase();
-    if (!cleanQuery) return withdrawals;
-    return withdrawals.filter((w) => (w.username || '').toLowerCase().includes(cleanQuery));
-  }, [withdrawals, searchQuery]);
+    if (!cleanQuery) return monthWithdrawals;
+    return monthWithdrawals.filter((w) => (w.username || '').toLowerCase().includes(cleanQuery));
+  }, [monthWithdrawals, searchQuery]);
 
   const monthlySummary = useMemo(() => {
     const currentMonthKey = getMonthKey(Date.now());
@@ -212,6 +229,22 @@ export default function AdminAllWithdrawalsScreen({ navigation }) {
         </View>
       </View>
 
+      <View style={currentStyles.summaryCard}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <TouchableOpacity onPress={() => shiftViewMonth(-1)} style={{ padding: 8 }}>
+            <Feather name="chevron-left" size={22} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
+          </TouchableOpacity>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={styles.summaryLabel}>{getMonthLabel(viewKey)}</Text>
+            <Text style={[styles.summaryValue, { color: '#EF4444' }]}>${viewTotal.toFixed(2)}</Text>
+            <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{monthWithdrawals.length + ' withdrawals'}</Text>
+          </View>
+          <TouchableOpacity onPress={() => shiftViewMonth(1)} style={{ padding: 8 }}>
+            <Feather name="chevron-right" size={22} color={isDarkMode ? '#FFFFFF' : '#1E293B'} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.searchSection}>
         <View style={currentStyles.searchWrapper}>
           <Feather name="search" size={16} color={isDarkMode ? "#8B949E" : "#94A3B8"} />
@@ -239,7 +272,7 @@ export default function AdminAllWithdrawalsScreen({ navigation }) {
         <View style={styles.loaderContainer}>
           <MaterialCommunityIcons name="cash-remove" size={32} color={isDarkMode ? "#334155" : "#CBD5E1"} />
           <Text style={styles.emptyText}>
-            {searchQuery ? 'No withdrawals found for that username.' : 'No completed withdrawals yet.'}
+            {searchQuery ? 'No withdrawals found for that username.' : 'No withdrawals in this month.'}
           </Text>
         </View>
       ) : (
