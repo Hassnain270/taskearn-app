@@ -221,6 +221,7 @@ const DEFAULT_BONUS_RATES = {
   vipUpgradeRate: 0.05,
   dailyTaskProfitRate: 0.0032,
   weeklyTargetPercent: 21,
+  withdrawalFeeRate: 0.07,
 };
 
 async function getBonusRates(db) {
@@ -235,6 +236,7 @@ async function getBonusRates(db) {
         vipUpgradeRate: typeof data.vipUpgradeRate === "number" ? data.vipUpgradeRate : DEFAULT_BONUS_RATES.vipUpgradeRate,
         dailyTaskProfitRate: typeof data.dailyTaskProfitRate === "number" ? data.dailyTaskProfitRate : DEFAULT_BONUS_RATES.dailyTaskProfitRate,
         weeklyTargetPercent: typeof data.weeklyTargetPercent === "number" ? data.weeklyTargetPercent : DEFAULT_BONUS_RATES.weeklyTargetPercent,
+        withdrawalFeeRate: typeof data.withdrawalFeeRate === "number" ? data.withdrawalFeeRate : DEFAULT_BONUS_RATES.withdrawalFeeRate,
       };
     }
   } catch (e) {
@@ -2077,6 +2079,11 @@ exports.requestWithdrawal = onCall(async (request) => {
   const amount = data.amount;
   const fee = data.fee;
   const netPayout = data.netPayout;
+  const amountNum = Number(amount);
+  const serverRates = await getBonusRates(admin.firestore());
+  const feeRate = (typeof serverRates.withdrawalFeeRate === "number") ? serverRates.withdrawalFeeRate : 0.07;
+  const serverFee = Number((amountNum * feeRate).toFixed(2));
+  const serverNetPayout = Number((amountNum - serverFee).toFixed(2));
 
   if (!amount || amount < 15) {
     throw new HttpsError("invalid-argument", "Minimum withdrawal amount is $15.00.");
@@ -2180,8 +2187,8 @@ exports.requestWithdrawal = onCall(async (request) => {
         userId: userId,
         username: userData.username || userData.email || "User",
         amount: Number(amount),
-        fee: Number(fee || 0),
-        netPayout: Number(netPayout || amount),
+        fee: serverFee,
+        netPayout: serverNetPayout,
         walletAddress: storedWalletAddress,
         walletNetwork: userData.walletNetwork || "TRC20",
         status: "pending",
@@ -3614,6 +3621,7 @@ exports.updateBonusConfig = onCall(async (request) => {
   validateRate("vipUpgradeRate", vipUpgradeRate, 1);
   validateRate("dailyTaskProfitRate", dailyTaskProfitRate, 0.1);
   validateRate("weeklyTargetPercent", weeklyTargetPercent, 100);
+  validateRate("withdrawalFeeRate", data.withdrawalFeeRate, 0.5);
 
   if (Object.keys(updates).length === 0) {
     throw new HttpsError("invalid-argument", "No valid rate fields were provided.");
