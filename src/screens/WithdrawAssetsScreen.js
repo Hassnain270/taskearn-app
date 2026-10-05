@@ -47,6 +47,19 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
 
   const [incomingBalance, setIncomingBalance] = useState(route?.params?.totalBalance || 0.00);
+  const [feeRate, setFeeRate] = useState(0.07);
+  const feePercentLabel = String(Number((feeRate * 100).toFixed(2)));
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const fn = httpsCallable(functions, 'getBonusConfig');
+        const res = await fn();
+        const r = res.data && res.data.rates;
+        if (r && typeof r.withdrawalFeeRate === 'number') setFeeRate(r.withdrawalFeeRate);
+      } catch (e) {}
+    })();
+  }, []);
   const [vipCapitalForLock, setVipCapitalForLock] = useState(route?.params?.totalBalance || 0.00);
   const [completedTaskCount, setCompletedTaskCount] = useState(route?.params?.taskCount || 0);
   const [lastTaskReset, setLastTaskReset] = useState(null);
@@ -160,7 +173,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
   const parsedAmount = parseFloat(withdrawAmount) || 0;
   const hasWallet = walletAddress.trim() !== "";
 
-  const operationalFee = parsedAmount > 0 ? Number((parsedAmount * 0.07).toFixed(2)) : 0;
+  const operationalFee = parsedAmount > 0 ? Number((parsedAmount * feeRate).toFixed(2)) : 0;
   const netPayoutPreview = parsedAmount > 0 ? Number((parsedAmount - operationalFee).toFixed(2)) : 0;
 
   const isTaskCompleted = effectiveTaskCount >= 5;
@@ -389,7 +402,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
                 <Text style={currentStyles.summaryValue}>${parsedAmount.toFixed(2)} USDT</Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Handling Fee (7%):</Text>
+                <Text style={styles.summaryLabel}>{'Handling Fee (' + feePercentLabel + '%):'}</Text>
                 <Text style={styles.feeValue}>-${operationalFee.toFixed(2)} USDT</Text>
               </View>
               <View style={[styles.summaryRow, currentStyles.totalRowBorder]}>
@@ -411,7 +424,7 @@ export default function WithdrawAssetsScreen({ navigation, route }) {
             </View>
             <View style={styles.bulletRow}>
               <Text style={styles.bullet}>•</Text>
-              <Text style={styles.bulletText}>A 7% operational configuration fee applies to all external global node transfers.</Text>
+              <Text style={styles.bulletText}>{'A ' + feePercentLabel + '% operational configuration fee applies to all external global node transfers.'}</Text>
             </View>
             <View style={styles.bulletRow}>
               <Text style={styles.bullet}>•</Text>

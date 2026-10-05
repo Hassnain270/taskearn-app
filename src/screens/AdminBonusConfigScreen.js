@@ -76,6 +76,13 @@ const RATE_FIELDS = [
     icon: 'chart-line',
     maxPercent: 10,
   },
+  {
+    key: 'withdrawalFeeRate',
+    label: 'Withdrawal Fee',
+    description: 'Percentage deducted from every withdrawal as a handling fee.',
+    icon: 'cash-minus',
+    maxPercent: 50,
+  },
 ];
 
 const formatDateForInput = (millis) => {
