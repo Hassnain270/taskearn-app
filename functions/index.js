@@ -675,8 +675,9 @@ async function getAppVersionConfigInternal(db) {
 }
 
 // Public: the app checks this on start to decide whether a mandatory update is required.
-exports.getAppVersionConfig = onCall(async () => {
+exports.getAppVersionConfig = onCall(async (request) => {
   const db = admin.firestore();
+  await markNewAppSeen(request);
   return await getAppVersionConfigInternal(db);
 });
 
@@ -704,6 +705,21 @@ exports.adminUpdateAppVersionConfig = onCall(async (request) => {
   await db.collection("config").doc("appVersion").set(updates, { merge: true });
   return { success: true, config: await getAppVersionConfigInternal(db) };
 });
+
+async function markNewAppSeen(request) {
+  try {
+    if (request && request.auth) {
+      await admin.firestore().collection("users").doc(request.auth.uid).set({ newAppSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    }
+  } catch (e) {}
+}
+
+async function assertNewApp(db, userData) {
+  if (!userData || userData.isAdmin === true || userData.newAppSeenAt) return;
+  const cfg = await getAppVersionConfigInternal(db);
+  const url = cfg.apkUrl || "https://firebasestorage.googleapis.com/v0/b/taskearn-e5c35.firebasestorage.app/o/TaskEarn.apk?alt=media";
+  throw new HttpsError("failed-precondition", "You are using an old version of TaskEarn. Please download and install the latest version (" + cfg.latestVersion + ") to continue. Download: " + url);
+}
 
 exports.calculateTeamStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
@@ -2117,6 +2133,8 @@ exports.requestWithdrawalOtp = onCall(
       );
     }
 
+    await assertNewApp(db, userData);
+
     if (isTrc20Address(userData.walletAddress)) {
       throw new HttpsError("failed-precondition", "TRC20 wallet addresses are no longer supported for withdrawals. Please go to Me, then Wallet Configuration, add a BEP20 (BNB Smart Chain) USDT address starting with 0x, and try again.");
     }
@@ -3312,6 +3330,10 @@ exports.completeTask = onCall(async (request) => {
 // will read it. This guarantees the "Expected Profit" preview and the
 // amount actually credited on confirm are always identical.
 exports.peekTaskProfit = onCall(async (request) => {
+  if (request.auth) {
+    const gateDoc = await admin.firestore().collection("users").doc(request.auth.uid).get();
+    if (gateDoc.exists) await assertNewApp(admin.firestore(), gateDoc.data());
+  }
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
 
   const userId = request.auth.uid;
@@ -3746,6 +3768,7 @@ exports.sendAnnouncement = onCall(async (request) => {
 });
 
 exports.getAnnouncements = onCall(async (request) => {
+  await markNewAppSeen(request);
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
 
