@@ -4268,10 +4268,10 @@ exports.chatWithSupportAI = onCall(
     }
     if (userMessage.length > 1000) throw new HttpsError("invalid-argument", "Message is too long.");
 
-    const rawHistory = Array.isArray(request.data && request.data.history) ? request.data.history.slice(-6) : [];
+    const rawHistory = Array.isArray(request.data && request.data.history) ? request.data.history.slice(-4) : [];
     const history = rawHistory.map((h) => {
       const text = (h && (h.text || h.content || (Array.isArray(h.parts) && h.parts[0] && h.parts[0].text))) || "";
-      return { role: (h && h.role === "user") ? "user" : "assistant", text: String(text) };
+      return { role: (h && h.role === "user") ? "user" : "assistant", text: String(text).slice(0, 500) };
     }).filter((h) => h.text.trim().length > 0);
 
     const apiKey = process.env.GROQ_API_KEY;
@@ -4327,9 +4327,9 @@ exports.chatWithSupportAI = onCall(
       let withdrawnS = 0; wds.forEach((w) => { if (w.status === "completed") withdrawnS += Number(w.amount || 0); });
       const members = snap[3].docs.map((d) => d.data()).sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt));
       let activeS = 0; members.forEach((m) => { if (isBalanceActive(m)) activeS++; });
-      const txText = txs.slice(0, 12).map((x) => fmt(x.createdAt) + " | " + (x.type || "") + " | $" + Number(x.amount || 0).toFixed(2) + (x.title ? " | " + String(x.title).slice(0, 50) : "") + (x.status && x.status !== "approved" ? " | " + x.status : "")).join("\n") || "none";
-      const wdText = wds.slice(0, 6).map((w) => fmt(w.createdAt) + " | requested $" + Number(w.amount || 0).toFixed(2) + ", net $" + Number(w.netPayout || w.amount || 0).toFixed(2) + " | " + (w.status || "") + (w.completedAt ? " | completed " + fmt(w.completedAt) : "") + (w.status === "rejected" ? " | reason: " + (w.rejectionReason ? String(w.rejectionReason).slice(0, 150) : "none written") : "")).join("\n") || "none";
-      const memText = members.slice(0, 20).map((m) => (m.username || "unknown") + " (" + (isBalanceActive(m) ? "active" : "inactive") + ", joined " + fmt(m.createdAt) + ")").join(", ") || "none";
+      const txText = txs.slice(0, 8).map((x) => fmt(x.createdAt) + " | " + (x.type || "") + " | $" + Number(x.amount || 0).toFixed(2) + "" + (x.status && x.status !== "approved" ? " | " + x.status : "")).join("\n") || "none";
+      const wdText = wds.slice(0, 5).map((w) => fmt(w.createdAt) + " | requested $" + Number(w.amount || 0).toFixed(2) + ", net $" + Number(w.netPayout || w.amount || 0).toFixed(2) + " | " + (w.status || "") + (w.completedAt ? " | completed " + fmt(w.completedAt) : "") + (w.status === "rejected" ? " | reason: " + (w.rejectionReason ? String(w.rejectionReason).slice(0, 150) : "none written") : "")).join("\n") || "none";
+      const memText = members.slice(0, 15).map((m) => (m.username || "unknown") + " (" + (isBalanceActive(m) ? "active" : "inactive") + ")").join(", ") || "none";
       const hist = Array.isArray(u.walletHistory) ? u.walletHistory : [];
       const walletText = !u.walletAddress ? "no wallet saved" : ("wallet ending in " + String(u.walletAddress).slice(-6) + ", first added: " + (u.walletAddressFirstAddedAt ? fmt(u.walletAddressFirstAddedAt) : "not recorded (wallet tracking started recently)") + ", last updated: " + (u.walletAddressUpdatedAt ? fmt(u.walletAddressUpdatedAt) : "not recorded") + ", recorded changes: " + (hist.length ? hist.map((h) => "ending in " + String(h.address || "").slice(-6) + " on " + fmt(h.at)).join("; ") : "none recorded"));
       systemPrompt += "\n\nTHIS USER'S ACCOUNT DATA (private, only for this user; all times are UTC). You DO have access to this data; answer account questions from it:" +
@@ -4379,14 +4379,14 @@ exports.chatWithSupportAI = onCall(
         const ms = x.createdAt && typeof x.createdAt.toMillis === "function" ? x.createdAt.toMillis() : 0;
         if (!ms || ms < cutoffMs) return;
         seen[d.id] = true;
-        lines.push({ ms: ms, text: "[" + label + ", " + new Date(ms).toISOString().slice(0, 10) + "] " + String(x.title || "").slice(0, 120) + ": " + String(x.message || "").slice(0, 300) });
+        lines.push({ ms: ms, text: "[" + label + ", " + new Date(ms).toISOString().slice(0, 10) + "] " + String(x.title || "").slice(0, 120) + ": " + String(x.message || "").slice(0, 200) });
       };
       results[0].forEach((d) => { const x = d.data(); if (!x.targetUid) addDoc(d, "Notification to all users"); });
       results[1].forEach((d) => addDoc(d, "Personal notification to this user"));
       results[2].forEach((d) => addDoc(d, "Announcement"));
       lines.sort((m, n) => n.ms - m.ms);
       if (lines.length > 0) {
-        systemPrompt += "\n\nRECENT MESSAGES FROM TASKEARN (newest first). Use these to understand recent changes and to explain them when the user asks about a notification or announcement. When a message describes a policy change, you may briefly say what the previous rule was and clearly explain the current rule. Only explain current rules and never guess about future changes. If an older instruction in this prompt conflicts with a newer message below, follow the newer message.\n" + lines.slice(0, 6).map((l) => l.text).join("\n");
+        systemPrompt += "\n\nRECENT MESSAGES FROM TASKEARN (newest first). Use these to understand recent changes and to explain them when the user asks about a notification or announcement. When a message describes a policy change, you may briefly say what the previous rule was and clearly explain the current rule. Only explain current rules and never guess about future changes. If an older instruction in this prompt conflicts with a newer message below, follow the newer message.\n" + lines.slice(0, 4).map((l) => l.text).join("\n");
       }
     } catch (e) {
       console.error("AI recent messages context failed:", e);
