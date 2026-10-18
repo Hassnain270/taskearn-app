@@ -235,7 +235,55 @@ const DEFAULT_BONUS_RATES = {
   withdrawalFeeRate: 0.07,
 };
 
+// Finds a running Promotion notification with a Bonus %, and treats it as a
+// temporary Direct Referral rate. The offer runs from 16:00 UTC on the start
+// date until 16:00 UTC on the end date (the app's day boundary).
+async function getActiveReferralOffer(db) {
+  try {
+    const snap = await db.collection("notifications")
+      .where("type", "==", "promotion")
+      .orderBy("createdAt", "desc")
+      .limit(10)
+      .get();
+    const nowMs = Date.now();
+    const shift = 16 * 60 * 60 * 1000;
+    for (const doc of snap.docs) {
+      const d = doc.data().promoDetails || {};
+      const startMs = Number(d.startDate) || 0;
+      const endMs = Number(d.endDate) || 0;
+      const pct = Number(d.bonusPercent) || 0;
+      if (!startMs || !endMs || pct <= 0 || pct > 50) continue;
+      if (nowMs >= startMs + shift && nowMs < endMs + shift) {
+        return { rate: pct / 100, endMs: endMs + shift };
+      }
+    }
+  } catch (e) {
+    console.error("Referral offer check failed:", e);
+  }
+  return null;
+}
+
+async function isAdminCaller(request) {
+  try {
+    if (!request || !request.auth) return false;
+    const d = await admin.firestore().collection("users").doc(request.auth.uid).get();
+    return d.exists && d.data().isAdmin === true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Effective rates: base rates plus any running referral offer.
 async function getBonusRates(db) {
+  const base = await getBaseBonusRates(db);
+  const offer = await getActiveReferralOffer(db);
+  if (offer) {
+    return Object.assign({}, base, { directReferralRate: offer.rate, referralOfferActive: true, referralOfferEndsAt: offer.endMs });
+  }
+  return base;
+}
+
+async function getBaseBonusRates(db) {
   try {
     const snap = await db.collection("config").doc("bonusRates").get();
     if (snap.exists) {
@@ -3652,7 +3700,7 @@ exports.checkNewPhoneAvailable = onCall(async (request) => {
 exports.getBonusConfig = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
-  const rates = await getBonusRates(db);
+  const rates = await (await isAdminCaller(request) ? getBaseBonusRates : getBonusRates)(db);
   return { success: true, rates: rates };
 });
 
@@ -3699,7 +3747,7 @@ exports.updateBonusConfig = onCall(async (request) => {
 
   await db.collection("config").doc("bonusRates").set(updates, { merge: true });
 
-  const newRates = await getBonusRates(db);
+  const newRates = await getBaseBonusRates(db);
   return { success: true, rates: newRates };
 });
 
