@@ -4444,7 +4444,7 @@ exports.chatWithSupportAI = onCall(
         return { reply: translated.replace(/\*\*/g, "").replace(/"/g, "").trim() };
       } catch (translateError) {
         console.error("chatWithSupportAI translation fallback also failed:", translateError);
-        return { reply: "Our support system is very busy right now, please try again in a few minutes." };
+        return { reply: "Our AI assistant is temporarily unavailable. Please try again later.\n\nہمارا AI اسسٹنٹ عارضی طور پر دستیاب نہیں ہے، براہِ کرم کچھ دیر بعد دوبارہ کوشش کریں۔" };
       }
     }
   }
