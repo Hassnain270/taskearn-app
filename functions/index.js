@@ -1669,6 +1669,154 @@ exports.adminGetOverWithdrawnUsers = onCall(async (request) => {
   return { success: true, noTeam: noTeam, withTeam: withTeam };
 });
 
+async function buildDownline(db, rootUid, excludeSet) {
+  const usersSnap = await db.collection("users").get();
+  const byUid = {};
+  const children = {};
+  usersSnap.forEach((d) => {
+    const u = d.data();
+    byUid[d.id] = u;
+    if (u.referredByUid) {
+      if (!children[u.referredByUid]) children[u.referredByUid] = [];
+      children[u.referredByUid].push(d.id);
+    }
+  });
+  const members = [];
+  const seen = {};
+  const queue = [{ uid: rootUid, level: 0 }];
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (seen[item.uid]) continue;
+    seen[item.uid] = true;
+    if (item.level > 0 && excludeSet && excludeSet[item.uid]) continue;
+    members.push(item);
+    (children[item.uid] || []).forEach((c) => queue.push({ uid: c, level: item.level + 1 }));
+  }
+  return { byUid: byUid, members: members };
+}
+
+async function requireAdmin(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
+  const d = await admin.firestore().collection("users").doc(request.auth.uid).get();
+  if (!d.exists || d.data().isAdmin !== true) throw new HttpsError("permission-denied", "Only administrators may do this.");
+}
+
+// Lists a user and their whole downline (direct and indirect) before deletion.
+exports.adminPreviewTeamDeletion = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = admin.firestore();
+  const rootUid = request.data && request.data.uid;
+  if (!rootUid) throw new HttpsError("invalid-argument", "A user UID is required.");
+  const tree = await buildDownline(db, rootUid, null);
+  if (!tree.byUid[rootUid]) throw new HttpsError("not-found", "User not found.");
+  const results = await Promise.all([
+    db.collection("transactions").where("type", "==", "DEPOSIT").where("status", "==", "approved").get(),
+    db.collection("withdrawals").get(),
+  ]);
+  const dep = {};
+  const wd = {};
+  const pending = {};
+  results[0].forEach((d) => { const x = d.data(); dep[x.userId] = (dep[x.userId] || 0) + Number(x.amount || 0); });
+  results[1].forEach((d) => {
+    const x = d.data();
+    if (x.status === "completed") wd[x.userId] = (wd[x.userId] || 0) + Number(x.amount || 0);
+    if (x.status === "pending") pending[x.userId] = true;
+  });
+  const rows = tree.members.map((m) => {
+    const u = tree.byUid[m.uid] || {};
+    return {
+      uid: m.uid,
+      username: u.username || m.uid,
+      level: m.level,
+      balance: Number(u.balance || u.totalBalance || 0),
+      deposited: Number((dep[m.uid] || 0).toFixed(2)),
+      withdrawn: Number((wd[m.uid] || 0).toFixed(2)),
+      hasPendingWithdrawal: !!pending[m.uid],
+      isAdmin: u.isAdmin === true,
+    };
+  });
+  return { success: true, rootUsername: (tree.byUid[rootUid].username || rootUid), members: rows };
+});
+
+// Permanently deletes a user and their downline, except excluded members and their teams.
+exports.adminDeleteUserWithTeam = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = admin.firestore();
+  const adminUid = request.auth.uid;
+  const data = request.data || {};
+  const rootUid = data.uid;
+  const confirmUsername = String(data.confirmUsername || "").trim().toLowerCase();
+  const reason = String(data.reason || "").trim().slice(0, 300);
+  const excludeSet = {};
+  (Array.isArray(data.excludeUids) ? data.excludeUids : []).forEach((id) => { if (id && id !== rootUid) excludeSet[id] = true; });
+  if (!rootUid) throw new HttpsError("invalid-argument", "A user UID is required.");
+  const tree = await buildDownline(db, rootUid, excludeSet);
+  const root = tree.byUid[rootUid];
+  if (!root) throw new HttpsError("not-found", "User not found.");
+  if (root.isAdmin === true) throw new HttpsError("failed-precondition", "An admin account cannot be deleted.");
+  if (!confirmUsername || confirmUsername !== String(root.username || "").toLowerCase()) {
+    throw new HttpsError("invalid-argument", "Confirmation username does not match.");
+  }
+  const targets = tree.members.filter((m) => tree.byUid[m.uid] && tree.byUid[m.uid].isAdmin !== true && m.uid !== adminUid);
+  if (targets.length > 500) throw new HttpsError("failed-precondition", "Too many accounts at once (more than 500).");
+  const targetSet = {};
+  targets.forEach((t) => { targetSet[t.uid] = t; });
+
+  let batch = db.batch();
+  let ops = 0;
+  const flush = async () => { if (ops > 0) { await batch.commit(); batch = db.batch(); ops = 0; } };
+
+  let cancelled = 0;
+  const pendSnap = await db.collection("withdrawals").where("status", "==", "pending").get();
+  for (const d of pendSnap.docs) {
+    if (targetSet[d.data().userId]) {
+      batch.update(d.ref, { status: "cancelled", cancelReason: "Account deleted", updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      ops++; cancelled++;
+      if (ops >= 400) await flush();
+    }
+  }
+
+  for (const t of targets) {
+    const u = tree.byUid[t.uid];
+    const referrer = u.referredByUid ? tree.byUid[u.referredByUid] : null;
+    batch.set(db.collection("deletedUsers").doc(t.uid), {
+      username: u.username || "",
+      email: u.email || "",
+      phoneNumber: u.phoneNumber || u.phone || "",
+      balance: Number(u.balance || u.totalBalance || 0),
+      vipCapital: (typeof u.vipCapital === "number") ? u.vipCapital : null,
+      referredByUid: u.referredByUid || null,
+      referrerUsername: referrer ? (referrer.username || "") : "",
+      rootUid: rootUid,
+      rootUsername: root.username || "",
+      level: t.level,
+      reason: reason,
+      deletedBy: adminUid,
+      deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    batch.delete(db.collection("users").doc(t.uid));
+    ops += 2;
+    if (ops >= 400) await flush();
+  }
+
+  for (const id of Object.keys(tree.byUid)) {
+    const u = tree.byUid[id];
+    if (!targetSet[id] && u.referredByUid && targetSet[u.referredByUid]) {
+      batch.update(db.collection("users").doc(id), { referredByUid: null, formerReferrerDeleted: true });
+      ops++;
+      if (ops >= 400) await flush();
+    }
+  }
+  await flush();
+
+  try {
+    await admin.auth().deleteUsers(targets.map((t) => t.uid));
+  } catch (e) {
+    console.error("Auth deletion error:", e);
+  }
+  return { success: true, deletedCount: targets.length, cancelledWithdrawals: cancelled };
+});
+
 exports.adminGetPlatformStats = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "User must be logged in.");
   const db = admin.firestore();
