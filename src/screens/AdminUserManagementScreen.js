@@ -905,7 +905,8 @@ export default function AdminUserManagementScreen({ navigation }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    {teamDeleteVisible && (
+    <Modal visible={teamDeleteVisible} transparent animationType="fade" onRequestClose={() => setTeamDeleteVisible(false)}>
+      {teamDeleteVisible && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 16, zIndex: 9999, elevation: 9999 }}>
           <View style={{ backgroundColor: isDarkMode ? '#161B22' : '#FFFFFF', borderRadius: 18, padding: 16, maxHeight: '92%' }}>
             <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626', marginBottom: 4 }}>Delete Account With Team</Text>
@@ -944,6 +945,7 @@ export default function AdminUserManagementScreen({ navigation }) {
           </View>
         </View>
       )}
+      </Modal>
 
       </SafeAreaView>
   );
