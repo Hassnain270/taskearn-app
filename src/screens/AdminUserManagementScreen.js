@@ -61,6 +61,13 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [editBalance, setEditBalance] = useState('');
   const [editVipCapital, setEditVipCapital] = useState('');
   const [savingVipCapital, setSavingVipCapital] = useState(false);
+  const [teamDeleteVisible, setTeamDeleteVisible] = useState(false);
+  const [teamPreview, setTeamPreview] = useState(null);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamExcluded, setTeamExcluded] = useState({});
+  const [teamConfirmText, setTeamConfirmText] = useState('');
+  const [teamReason, setTeamReason] = useState('');
+  const [teamDeleting, setTeamDeleting] = useState(false);
   const [restrictedTasksMode, setRestrictedTasksMode] = useState(false);
   const [balanceReason, setBalanceReason] = useState('');
   const [saving, setSaving] = useState(false);
@@ -159,6 +166,54 @@ export default function AdminUserManagementScreen({ navigation }) {
   const [tempPassword, setTempPassword] = useState('');
   const [settingPassword, setSettingPassword] = useState(false);
   const [showTempPassword, setShowTempPassword] = useState(false);
+
+  const openTeamDelete = async () => {
+    if (!selectedDetail) return;
+    setTeamDeleteVisible(true);
+    setTeamPreview(null);
+    setTeamExcluded({});
+    setTeamConfirmText('');
+    setTeamReason('');
+    setTeamLoading(true);
+    try {
+      const fn = httpsCallable(functions, 'adminPreviewTeamDeletion');
+      const res = await fn({ uid: selectedDetail.uid });
+      setTeamPreview(res.data || null);
+    } catch (err) {
+      setTeamDeleteVisible(false);
+      showAlert('Error', err.message || 'Failed to load the team.');
+    } finally {
+      setTeamLoading(false);
+    }
+  };
+
+  const toggleTeamExclude = (uid) => {
+    setTeamExcluded((prev) => {
+      const next = { ...prev };
+      if (next[uid]) delete next[uid]; else next[uid] = true;
+      return next;
+    });
+  };
+
+  const confirmTeamDelete = async () => {
+    if (!teamPreview || !selectedDetail) return;
+    if (teamConfirmText.trim().toLowerCase() !== String(teamPreview.rootUsername || '').toLowerCase()) {
+      showAlert('Confirmation Required', 'Please type the username exactly to confirm.');
+      return;
+    }
+    setTeamDeleting(true);
+    try {
+      const fn = httpsCallable(functions, 'adminDeleteUserWithTeam');
+      const res = await fn({ uid: selectedDetail.uid, excludeUids: Object.keys(teamExcluded), confirmUsername: teamConfirmText.trim(), reason: teamReason.trim() });
+      const r = (res && res.data) || {};
+      setTeamDeleteVisible(false);
+      showAlert('Deleted', (r.deletedCount || 0) + ' account(s) permanently deleted. ' + (r.cancelledWithdrawals || 0) + ' pending withdrawal(s) cancelled. Please go back and refresh the user list.');
+    } catch (err) {
+      showAlert('Error', err.message || 'Failed to delete.');
+    } finally {
+      setTeamDeleting(false);
+    }
+  };
 
   const handleSaveVipCapital = async () => {
     if (!selectedDetail) return;
@@ -629,6 +684,10 @@ export default function AdminUserManagementScreen({ navigation }) {
                         {savingVipCapital ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save VIP Capital</Text>}
                       </TouchableOpacity>
 
+                      <TouchableOpacity style={{ backgroundColor: '#DC2626', height: 46, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8, marginBottom: 16 }} onPress={openTeamDelete}>
+                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>Delete Account With Team</Text>
+                      </TouchableOpacity>
+
                       {showReasonField && (
                         <React.Fragment>
                           <Text style={[styles.fieldLabel, { color: '#F59E0B' }]}>
@@ -846,7 +905,47 @@ export default function AdminUserManagementScreen({ navigation }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </SafeAreaView>
+    {teamDeleteVisible && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 16, zIndex: 9999, elevation: 9999 }}>
+          <View style={{ backgroundColor: isDarkMode ? '#161B22' : '#FFFFFF', borderRadius: 18, padding: 16, maxHeight: '92%' }}>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626', marginBottom: 4 }}>Delete Account With Team</Text>
+            <Text style={{ fontSize: 12, color: '#94A3B8', marginBottom: 10 }}>Tap an account to KEEP it (its team will also be kept). All others will be permanently deleted.</Text>
+            {teamLoading || !teamPreview ? (
+              <ActivityIndicator color="#DC2626" style={{ marginVertical: 30 }} />
+            ) : (
+              <>
+                <ScrollView style={{ maxHeight: 300, marginBottom: 10 }}>
+                  {(teamPreview.members || []).map((m) => {
+                    const kept = !!teamExcluded[m.uid];
+                    return (
+                      <TouchableOpacity key={m.uid} disabled={m.level === 0} onPress={() => toggleTeamExclude(m.uid)} style={{ paddingVertical: 8, paddingLeft: 8 + Math.min(m.level, 6) * 14, paddingRight: 8, borderBottomWidth: 1, borderBottomColor: isDarkMode ? '#21262D' : '#F1F5F9', backgroundColor: kept ? 'rgba(34,197,94,0.12)' : 'transparent' }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: kept ? '#22C55E' : (isDarkMode ? '#FFFFFF' : '#1E293B'), textDecorationLine: kept ? 'none' : 'none' }}>{(m.level === 0 ? 'ROOT  ' : 'L' + m.level + '  ') + m.username}</Text>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: kept ? '#22C55E' : '#DC2626' }}>{kept ? 'KEEP' : 'DELETE'}</Text>
+                        </View>
+                        <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{'Bal $' + Number(m.balance || 0).toFixed(2) + '  |  Dep $' + Number(m.deposited || 0).toFixed(2) + '  |  Wd $' + Number(m.withdrawn || 0).toFixed(2) + (m.hasPendingWithdrawal ? '  |  PENDING WD' : '') + (m.isAdmin ? '  |  ADMIN (skipped)' : '')}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: isDarkMode ? '#FFFFFF' : '#1E293B', marginBottom: 8 }}>{'Accounts in chain: ' + (teamPreview.members || []).length + '  |  Marked KEEP: ' + Object.keys(teamExcluded).length}</Text>
+                <TextInput style={{ borderWidth: 1, borderColor: isDarkMode ? '#30363D' : '#E2E8F0', borderRadius: 10, padding: 10, marginBottom: 8, color: isDarkMode ? '#FFFFFF' : '#1E293B' }} placeholder="Reason (e.g. self-referral chain)" placeholderTextColor="#94A3B8" value={teamReason} onChangeText={setTeamReason} />
+                <TextInput style={{ borderWidth: 1, borderColor: '#DC2626', borderRadius: 10, padding: 10, marginBottom: 12, color: isDarkMode ? '#FFFFFF' : '#1E293B' }} placeholder={'Type "' + teamPreview.rootUsername + '" to confirm'} placeholderTextColor="#94A3B8" autoCapitalize="none" value={teamConfirmText} onChangeText={setTeamConfirmText} />
+              </>
+            )}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity disabled={teamDeleting} onPress={() => setTeamDeleteVisible(false)} style={{ flex: 1, height: 46, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(148,163,184,0.18)' }}>
+                <Text style={{ color: '#94A3B8', fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={teamDeleting || teamLoading || !teamPreview} onPress={confirmTeamDelete} style={{ flex: 1, height: 46, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: '#DC2626' }}>
+                {teamDeleting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>Delete Permanently</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      </SafeAreaView>
   );
 }
 
